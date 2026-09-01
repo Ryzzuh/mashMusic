@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en" data-skin="jukebox">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mashmusic</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <defs>
+    <!-- Genuine pixelation: tile a single sampled pixel across a block grid. -->
+    <filter id="pixelate" x="0" y="0" width="100%" height="100%">
+      <feFlood x="2" y="2" height="1" width="1"></feFlood>
+      <feComposite width="5" height="5"></feComposite>
+      <feTile result="grid"></feTile>
+      <feComposite in="SourceGraphic" in2="grid" operator="in"></feComposite>
+      <feMorphology operator="dilate" radius="2.5"></feMorphology>
+    </filter>
+
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M7 5v14M20 5.5v13a1 1 0 0 1-1.55.83l-9.2-6.5a1 1 0 0 1 0-1.66l9.2-6.5A1 1 0 0 1 20 5.5z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.6v14.8a1 1 0 0 0 1.53.85l11.6-7.4a1 1 0 0 0 0-1.7L8.53 3.75A1 1 0 0 0 7 4.6z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6.5 4h3.6v16H6.5zM13.9 4h3.6v16h-3.6z"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M17 5v14M4 5.5v13a1 1 0 0 0 1.55.83l9.2-6.5a1 1 0 0 0 0-1.66l-9.2-6.5A1 1 0 0 0 4 5.5z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><path d="M5.5 5.5h13v13h-13z"/></symbol>
+    <symbol id="i-random" viewBox="0 0 24 24"><path d="M3 6.5h3.2c1.4 0 2.2.7 3 1.9l4.6 7.2c.8 1.2 1.6 1.9 3 1.9H21M3 17.5h3.2c1.4 0 2.2-.7 3-1.9l1.3-2M13.6 8.4l1.2-1.9c.8-1.2 1.6-1.9 3-1.9H21M18 2.5 21.5 6 18 9.5M18 14.5l3.5 3.5-3.5 3.5"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.4 4.6 13c-2-2-2-5.2 0-7.2s5.2-2 7.2 0l.2.2.2-.2c2-2 5.2-2 7.2 0s2 5.2 0 7.2z"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 10.6v6.2"/><circle cx="12" cy="7.6" r="1.15"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16.2 16.2 21 21"/></symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">mash</span><span class="brand-mark alt">music</span>
+    <span class="brand-note" id="brandCount">—</span>
+    <button class="brand-info" id="btnContrib" aria-haspopup="dialog" title="Who posted these?">
+      <svg aria-hidden="true"><use href="#i-info"></use></svg>
+      <span class="sr-only">Contributors</span>
+    </button>
+  </div>
+
+  <div class="tools">
+    <label class="search">
+      <svg class="search-ico" aria-hidden="true"><use href="#i-search"></use></svg>
+      <input type="search" id="search" placeholder="Search titles and posters" autocomplete="off" spellcheck="false">
+    </label>
+
+    <div class="switch" role="group" aria-label="Track list visibility">
+      <button data-listmode="show" aria-pressed="true">Shown</button>
+      <button data-listmode="blur" aria-pressed="false">Obfuscated</button>
+      <button data-listmode="hide" aria-pressed="false">Hidden</button>
+    </div>
+
+    <div class="switch" role="group" aria-label="Theme">
+      <button data-skin="jukebox" aria-pressed="true">Jukebox</button>
+      <button data-skin="night" aria-pressed="false">Night Dial</button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <section class="stage" aria-label="Now playing">
+    <div class="stage-media">
+      <div class="media-slot" id="slotYT" hidden><div id="ytPlayer"></div></div>
+      <div class="media-slot" id="slotSC" hidden></div>
+      <div class="media-slot media-idle" id="slotIdle">
+        <div class="idle-art" aria-hidden="true">
+          <span class="idle-bars"><i></i><i></i><i></i><i></i><i></i></span>
+        </div>
+        <p class="idle-copy">Pick a track from the list below.</p>
+      </div>
+    </div>
+
+    <div class="stage-meta">
+      <div class="np-source" id="npSource">—</div>
+      <h1 class="np-title" id="npTitle">Nothing playing</h1>
+      <p class="np-sub" id="npSub">1,257 tracks, posted by friends between 2012 and 2015.</p>
+      <div class="np-flags" id="npFlags"></div>
+    </div>
+  </section>
+
+  <section class="transport" aria-label="Transport">
+    <button class="tbtn t-prev"   id="bPrev"   title="Previous"><svg><use href="#i-prev"></use></svg></button>
+    <button class="tbtn t-play"   id="bPlay"   title="Play"><svg><use href="#i-play"></use></svg></button>
+    <button class="tbtn t-pause"  id="bPause"  title="Pause"><svg><use href="#i-pause"></use></svg></button>
+    <button class="tbtn t-next"   id="bNext"   title="Next"><svg><use href="#i-next"></use></svg></button>
+    <button class="tbtn t-stop"   id="bStop"   title="Stop"><svg><use href="#i-stop"></use></svg></button>
+    <button class="tbtn t-random" id="bRandom" title="Shuffle" aria-pressed="false"><svg><use href="#i-random"></use></svg></button>
+    <button class="tbtn t-heart"  id="bFavs"   title="Favourites only" aria-pressed="false"><svg><use href="#i-heart"></use></svg></button>
+  </section>
+
+  <section class="listing" aria-label="Tracks">
+    <ol class="tracklist" id="tracklist"></ol>
+    <div class="sentinel" id="sentinel" aria-hidden="true"></div>
+    <p class="list-end" id="listEnd" hidden>End of the list.</p>
+  </section>
+
+</main>
+
+<dialog class="modal" id="contribModal" aria-labelledby="contribTitle">
+  <header class="modal-head">
+    <div class="modal-heading">
+      <h2 id="contribTitle">Contributors</h2>
+      <p class="modal-sub" id="contribSub"></p>
+    </div>
+    <button class="modal-close" id="contribClose" aria-label="Close">&times;</button>
+  </header>
+  <ol class="contrib-list" id="contribList"></ol>
+</dialog>
+
+<footer class="statusbar">
+  <span id="statLoaded">—</span>
+  <span id="statDead"></span>
+  <span class="stat-spacer"></span>
+  <span id="statNote"></span>
+</footer>
+
+<script src="data/tracks.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
