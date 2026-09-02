@@ -74,11 +74,18 @@
       </div>
     </div>
 
-    <div class="stage-meta">
-      <div class="np-source" id="npSource">—</div>
-      <h1 class="np-title" id="npTitle">Nothing playing</h1>
-      <p class="np-sub" id="npSub">1,257 tracks, posted by friends between 2012 and 2015.</p>
-      <div class="np-flags" id="npFlags"></div>
+    <div class="stage-side">
+      <div class="stage-meta">
+        <div class="np-source" id="npSource">—</div>
+        <h1 class="np-title" id="npTitle">Nothing playing</h1>
+        <p class="np-sub" id="npSub">1,257 tracks, posted by friends between 2012 and 2015.</p>
+        <div class="np-flags" id="npFlags"></div>
+      </div>
+
+      <section class="eq" aria-label="Spectrum">
+        <canvas id="eqScope"></canvas>
+        <span class="eq-tag" id="eqTag">no envelope</span>
+      </section>
     </div>
   </section>
 
@@ -89,11 +96,6 @@
       <span id="scrubNow">0:00</span>
       <span id="scrubEnd">0:00</span>
     </div>
-  </section>
-
-  <section class="eq" aria-label="Spectrum">
-    <canvas id="eqScope"></canvas>
-    <span class="eq-tag" id="eqTag">no envelope</span>
   </section>
 
   <section class="transport" aria-label="Transport">
