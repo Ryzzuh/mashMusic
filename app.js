@@ -773,19 +773,24 @@
     scrubCanvas.width = Math.round(scrubW * dpr);
     scrubCanvas.height = Math.round(scrubH * dpr);
     sCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    buildScrubWave();
   }
   new ResizeObserver(scrubResize).observe(scrubCanvas);
 
-  // Collapse the envelope to one peak per pixel column.
+  // Collapse the envelope to a fixed number of buckets. Deliberately not tied
+  // to the canvas width: a ResizeObserver can deliver a transient zero-width
+  // measurement, and rebuilding on every resize meant one bad reading wiped the
+  // waveform for the rest of the track.
+  const WAVE_BUCKETS = 2048;
+
   function buildScrubWave() {
-    if (!eqData || scrubW < 2) { scrubWave = null; return; }
+    if (!eqData) { scrubWave = null; return; }
     const { bands, frames, stride, body } = eqData;
-    const out = new Float32Array(scrubW);
+    const n = WAVE_BUCKETS;
+    const out = new Float32Array(n);
     let mx = 0;
-    for (let x = 0; x < scrubW; x++) {
-      const f0 = Math.floor(x * frames / scrubW);
-      const f1 = Math.max(f0 + 1, Math.floor((x + 1) * frames / scrubW));
+    for (let x = 0; x < n; x++) {
+      const f0 = Math.floor(x * frames / n);
+      const f1 = Math.max(f0 + 1, Math.floor((x + 1) * frames / n));
       const step = Math.max(1, Math.floor((f1 - f0) / 16));   // subsample long spans
       let peak = 0;
       for (let f = f0; f < f1; f += step) {
@@ -800,7 +805,7 @@
       out[x] = peak;
       if (peak > mx) mx = peak;
     }
-    if (mx > 0) for (let x = 0; x < scrubW; x++) out[x] /= mx;
+    if (mx > 0) for (let x = 0; x < n; x++) out[x] /= mx;
     scrubWave = out;
   }
 
@@ -819,7 +824,8 @@
 
     if (scrubWave && !quiet) {
       for (let x = 0; x < W; x++) {
-        const v = scrubWave[Math.min(scrubWave.length - 1, x)];
+        const v = scrubWave[Math.min(scrubWave.length - 1,
+                              Math.floor(x / W * scrubWave.length))];
         const h = Math.max(1, v * (H - 6));
         sCtx.fillStyle = x / W <= frac ? SCOL.played : SCOL.ahead;
         sCtx.fillRect(x, mid - h / 2, 1, h);

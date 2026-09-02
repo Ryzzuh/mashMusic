@@ -65,7 +65,9 @@ Pages site and fetched from `../mashMusic-eq/`. Tracks without one fall back to
 a flat display and say so.
 
 **Scrubber.** Draws its waveform from that same envelope, collapsed across all
-bands. Dragging previews without seeking; releasing commits it. For 200 ms after
+bands into a fixed 2,048 buckets — deliberately not tied to the canvas width,
+since a ResizeObserver can report a transient 1px measurement and rebuilding on
+every resize meant one bad reading wiped the waveform for the rest of the track. Dragging previews without seeking; releasing commits it. For 200 ms after
 a seek it drops to a plain style rather than painting a waveform against a
 playhead that has not settled. It binds to both players — `getCurrentTime` and
 `seekTo` for YouTube, the widget's callback-style equivalents for SoundCloud.
