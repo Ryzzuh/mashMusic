@@ -12,7 +12,6 @@
   --r: 6px;
   --row-h: 54px;
   --bar-h: 34px;
-  --sc-canvas: #ece3d2;   /* rgb(236, 227, 210) behind the SoundCloud widget */
   --ease: cubic-bezier(.22,.61,.36,1);
 }
 
@@ -271,13 +270,14 @@ main {
 #ytPlayer, #ytPlayer iframe { width: 100%; height: 100%; border: 0; }
 
 /* The SoundCloud widget has a fixed natural height, so rather than stretching
-   it to fill a 16:9 box it sits at that height, centred on the midline, on its
-   own canvas colour. */
+   it to fill a 16:9 box it sits at that height, centred on the midline. The
+   surround uses --sunk, the same recessed tone as the spectrum panel and the
+   video box, so it follows the theme. */
 #slotSC {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--sc-canvas);
+  background: var(--sunk);
 }
 #slotSC iframe {
   width: 100%;
