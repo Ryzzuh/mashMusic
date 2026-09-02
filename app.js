@@ -534,15 +534,13 @@
   let eqRaf = 0, eqLastT = 0;
 
   // Scrubber. Its waveform is the same envelope the spectrum reads, collapsed
-  // across bands. After a seek it drops to the plain style briefly, so it never
-  // paints a waveform against a playhead that has not settled yet.
-  const SCRUB_QUIET_MS = 200;
+  // across bands. It is a picture of the whole track, so it stays drawn at all
+  // times — seeking does not make it stale.
   const scrubCanvas = $("scrubber");
   const sCtx = scrubCanvas.getContext("2d");
   let scrubW = 0, scrubH = 0;
   let scrubWave = null;             // per-pixel peak, or null for the plain style
   let scrubDrag = null;             // seconds while dragging, else null
-  let scrubQuietUntil = 0;
   let lastTimeLabel = "";
 
   // Same geometric spacing the analyser used, for the tilt curve.
@@ -719,7 +717,6 @@
     // Move the clock immediately rather than waiting for the next poll, so the
     // spectrum resumes from the right place instead of replaying stale frames.
     clockAnchor = { media: target, wall: performance.now() };
-    scrubQuietUntil = performance.now() + SCRUB_QUIET_MS;
   }
   setInterval(anchorClock, 250);
 
@@ -819,10 +816,7 @@
     const frac = dur > 0 ? Math.max(0, Math.min(1, pos / dur)) : 0;
     const mid = H / 2;
 
-    // The 200 ms after a seek deliberately shows the plain style.
-    const quiet = performance.now() < scrubQuietUntil;
-
-    if (scrubWave && !quiet) {
+    if (scrubWave) {
       for (let x = 0; x < W; x++) {
         const v = scrubWave[Math.min(scrubWave.length - 1,
                               Math.floor(x / W * scrubWave.length))];
@@ -831,6 +825,7 @@
         sCtx.fillRect(x, mid - h / 2, 1, h);
       }
     } else {
+      // no envelope for this track: a plain progress bar
       sCtx.fillStyle = SCOL.track;
       sCtx.fillRect(0, mid - 2, W, 4);
       sCtx.fillStyle = SCOL.played;

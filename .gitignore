@@ -45,3 +45,6 @@ Temporary Items
 # Python bytecode from tools/
 __pycache__/
 *.pyc
+
+# screen recordings dropped in for debugging
+*.mov
