@@ -68,7 +68,7 @@ html[data-skin="night"] {
 
   --ink:         #ece3d2;
   --ink-2:       #a49a86;
-  --ink-3:       #6f6a5f;
+  --ink-3:       #918875;
   --ink-on-tint: #0d1420;
 
   --line:        #24303f;
@@ -83,7 +83,7 @@ html[data-skin="night"] {
 
   --ok:          #7fa87f;
   --warn:        #d08a4a;
-  --dead:        #9c6a5a;
+  --dead:        #b98274;
 
   --c-prev:      #e8a33d;
   --c-play:      #e8a33d;
@@ -765,12 +765,18 @@ main {
 .stage-strip {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 14px;
   min-height: 0;
   min-width: 0;
 }
+/* Pin the columns explicitly. Without this the spectrum drops into the auto
+   column whenever the art tile is hidden, and sizes to content rather than
+   filling the row. */
+.art { grid-column: 1; }
+.eq  { grid-column: 2; }
 
 .art {
+  /* the gap lives here, not on the grid, so it disappears with the tile */
+  margin-right: 14px;
   aspect-ratio: 1;
   height: 100%;
   background: var(--sunk);

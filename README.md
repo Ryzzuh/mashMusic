@@ -128,6 +128,32 @@ per track.
 The API key is optional. Without it the SoundCloud half is still checked, and
 the app keeps learning from playback either way.
 
+## Tests
+
+```bash
+npm install
+npm test
+```
+
+Playwright drives the installed Google Chrome — `channel: "chrome"`, because
+Playwright ships no Chromium build for macOS 13, which this machine runs. It
+starts `tools/serve.py` itself and blocks every third-party host, so runs need
+no network and are identical each time. About 30 seconds for 20 tests.
+
+The suite encodes the measurements this player was built on, since those are
+what drift silently: the stage column gap equals the video-to-scrubber
+distance, the side column matches the video height, the now-playing text and
+spectrum stay 2:1, and the scrubber paints flush to its canvas top in both the
+playing and no-envelope states. Alongside those it covers the SoundCloud slot
+hiding behind YouTube, hidden list mode leaking no titles, shuffle being
+reversible, windowed loading, dead-track skipping, artwork falling back when
+YouTube returns its 120x90 stub, WCAG AA across both themes, and the envelope
+format and analyser invariants.
+
+It has been checked against real regressions rather than assumed to work:
+removing `#slotSC[hidden]`, re-inserting the waveform's 3px inset, and
+restoring the under-contrast Jukebox wood tone each turn the relevant test red.
+
 ## Known limits
 
 **Analysis is not live.** The spectrum is a recording of what the audio looked
