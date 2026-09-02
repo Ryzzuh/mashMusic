@@ -523,6 +523,11 @@
   let eqLevels = null, eqPeaks = null, eqPeakVel = null, eqHold = null;
   let clockAnchor = null;           // { media, wall } — re-taken 4x a second
   let mediaDuration = 0;
+  // True when the player is playing something other than the track we analysed
+  // — an ad, or a different upload. getDuration() reports whatever is actually
+  // loaded, so it stops matching the envelope's own length.
+  let contentMismatch = false;
+  const CONTENT_TOLERANCE = 2.0;   // seconds; a real match agrees within ~0.15
   let eqRaf = 0, eqLastT = 0;
 
   // Scrubber. Its waveform is the same envelope the spectrum reads, collapsed
@@ -623,6 +628,7 @@
     eqData = null;
     clockAnchor = null;
     mediaDuration = 0;
+    contentMismatch = false;
     scrubWave = null;
     scrubDrag = null;
     lastTimeLabel = "";
@@ -645,7 +651,8 @@
         buf[8] | (buf[9] << 8) | (buf[10] << 16) | (buf[11] << 24);
       const stride = (bands + 1) >> 1;
 
-      eqData = { bands, fps, frames, stride, body: buf.subarray(16) };
+      eqData = { bands, fps, frames, stride, seconds: frames / fps,
+                 body: buf.subarray(16) };
       allocBands(bands);
       eqCentres = bandCentres(bands, 40, 16000);
       buildScrubWave();
@@ -665,8 +672,19 @@
     try {
       if (track.s === "YT" && yt && ytReady) {
         const pos = yt.getCurrentTime(), dur = yt.getDuration();
+        if (ok(dur) && dur > 0 && eqData) {
+          const was = contentMismatch;
+          contentMismatch = Math.abs(dur - eqData.seconds) > CONTENT_TOLERANCE;
+          if (contentMismatch !== was) {
+            setEqTag(contentMismatch
+              ? "paused — ad or different cut"
+              : eqData.bands + " bands · " + eqData.fps + " fps", !contentMismatch);
+          }
+        }
         if (ok(pos)) clockAnchor = { media: pos, wall: performance.now() };
-        if (ok(dur) && dur > 0) mediaDuration = dur;
+        // Hold the content duration through an ad so the scrubber does not
+        // rescale itself to a 15-second pre-roll.
+        if (ok(dur) && dur > 0 && !contentMismatch) mediaDuration = dur;
       } else if (track.s === "SC" && sc && scReady) {
         // The widget answers by callback rather than return value.
         sc.getPosition((ms) => {
@@ -793,7 +811,7 @@
     // The 200 ms after a seek deliberately shows the plain style.
     const quiet = performance.now() < scrubQuietUntil;
 
-    if (scrubWave && !quiet) {
+    if (scrubWave && !quiet && !contentMismatch) {
       for (let x = 0; x < W; x++) {
         const v = scrubWave[Math.min(scrubWave.length - 1, x)];
         const h = Math.max(1, v * (H - 6));
@@ -862,7 +880,7 @@
 
     eqCtx.clearRect(0, 0, eqW, eqH);
 
-    const active = eqData && state.current && state.playing;
+    const active = eqData && state.current && state.playing && !contentMismatch;
     const n = eqData ? eqData.bands : 24;
     allocBands(n);
 

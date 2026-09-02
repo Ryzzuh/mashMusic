@@ -131,8 +131,16 @@ the app keeps learning from playback either way.
 **Analysis is not live.** The spectrum is a recording of what the audio looked
 like, replayed against the player's clock, so it is only as accurate as that
 clock — which resolves to about a quarter second and is interpolated in between.
-It cannot react to anything the analysis did not see: a different upload of the
-same video, an ad, or YouTube's own volume normalisation.
+It cannot react to anything the analysis did not see, such as YouTube's own
+volume normalisation.
+
+It can, however, tell when it is being shown the wrong audio. `getDuration()`
+reports whatever is actually loaded, so during an ad — or on a different upload
+of the same video — it stops agreeing with the envelope's own length. When
+content really is playing the two agree to within about 0.15 s, against ads of
+5-30 s, so the test is not close. On a mismatch the spectrum flattens and says
+so rather than animating to audio nobody is hearing, and the scrubber keeps the
+content duration instead of rescaling itself to a 15-second pre-roll.
 
 **Roughly a third of the library is gone.** The full analysis run found ~34% of
 YouTube ids unavailable, which is worse than a 120-track sample had suggested
