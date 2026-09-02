@@ -820,21 +820,23 @@
       for (let x = 0; x < W; x++) {
         const v = scrubWave[Math.min(scrubWave.length - 1,
                               Math.floor(x / W * scrubWave.length))];
-        const h = Math.max(1, v * (H - 6));
+        const h = Math.max(1, v * H);          // flush to the canvas edges
         sCtx.fillStyle = x / W <= frac ? SCOL.played : SCOL.ahead;
         sCtx.fillRect(x, mid - h / 2, 1, h);
       }
     } else {
-      // no envelope for this track: a plain progress bar
+      // No envelope for this track. Drawn full height rather than as a thin
+      // centred line so its bounding box starts at the canvas top too — the
+      // gap below the video then reads the same in both states.
       sCtx.fillStyle = SCOL.track;
-      sCtx.fillRect(0, mid - 2, W, 4);
+      sCtx.fillRect(0, 0, W, H);
       sCtx.fillStyle = SCOL.played;
-      sCtx.fillRect(0, mid - 2, W * frac, 4);
+      sCtx.fillRect(0, 0, W * frac, H);
     }
 
     if (state.current) {
       sCtx.fillStyle = SCOL.head;
-      sCtx.fillRect(Math.max(0, Math.min(W - 2, W * frac - 1)), 1, 2, H - 2);
+      sCtx.fillRect(Math.max(0, Math.min(W - 2, W * frac - 1)), 0, 2, H);
     }
 
     const label = fmtDur(Math.round(pos)) + "|" + fmtDur(Math.round(dur));
