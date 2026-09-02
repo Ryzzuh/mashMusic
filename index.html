@@ -82,6 +82,20 @@
     </div>
   </section>
 
+  <section class="scrub" aria-label="Seek">
+    <canvas id="scrubber" role="slider" tabindex="0"
+            aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></canvas>
+    <div class="scrub-times">
+      <span id="scrubNow">0:00</span>
+      <span id="scrubEnd">0:00</span>
+    </div>
+  </section>
+
+  <section class="eq" aria-label="Spectrum">
+    <canvas id="eqScope"></canvas>
+    <span class="eq-tag" id="eqTag">no envelope</span>
+  </section>
+
   <section class="transport" aria-label="Transport">
     <button class="tbtn t-prev"   id="bPrev"   title="Previous"><svg><use href="#i-prev"></use></svg></button>
     <button class="tbtn t-play"   id="bPlay"   title="Play"><svg><use href="#i-play"></use></svg></button>

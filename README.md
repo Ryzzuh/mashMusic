@@ -10,15 +10,17 @@ from January 2015 to March 2025 — is preserved in this repository's log.
 
 ## Running it
 
-There is no build step. Any static file server will do:
+There is no build step:
 
 ```bash
-python3 -m http.server 8412
+python3 tools/serve.py 8412
 ```
 
-Then open <http://localhost:8412>. Serve it over HTTP rather than opening
-`index.html` off disk — YouTube's embed API is unreliable from a `file://`
-origin.
+Then open <http://localhost:8412>. Use this rather than `python3 -m
+http.server` — it maps `/mashMusic-eq/` to the sibling envelope checkout so
+local paths match the published ones, and it disables caching so you are not
+debugging a stale `app.js`. Serve over HTTP rather than opening `index.html`
+off disk; YouTube's embed API is unreliable from a `file://` origin.
 
 ## What it does
 
@@ -32,9 +34,9 @@ titles with an SVG `feTile` filter — this is cosmetic, and the text is still i
 the DOM. *Hidden* never writes titles into the document at all; rows read
 `0121 · YT · 7:41` until a track is played, which reveals just that row.
 
-**A liveness store.** Roughly a quarter of the library no longer plays: sampling
-found ~21% of YouTube IDs removed or private, ~3% with embedding disabled, and
-~20% of SoundCloud tracks gone. The app records each verdict in `localStorage`
+**A liveness store.** A large share of the library no longer plays. Analysing
+every YouTube id found ~34% unavailable — worse than the ~24% a 120-track
+sample had predicted — and sampling put SoundCloud around 20%. The app records each verdict in `localStorage`
 as it learns it, from the players' own error events — YouTube error 100 is
 removed or private, 101 and 150 mean the owner disabled embedding — and skips
 those tracks during autoplay instead of stalling on them. A track that simply
@@ -48,6 +50,26 @@ button's indigo, is the body ink. *Night Dial* is a lit receiver dial: warm
 amber on deep blue-black. The choice is stored locally and is independent of
 your OS light/dark setting.
 
+**A real spectrum analyser.** The equalizer follows the actual audio, which
+takes some explaining: Web Audio cannot reach inside a cross-origin iframe, so
+the page can never analyse YouTube's output while it plays. Instead the analysis
+happens offline, once, and the result ships as data. `tools/build-envelopes.py`
+streams each track, runs an STFT, and stores 24 log-spaced band levels 25 times
+a second at 4 bits each — about 300 bytes per second of audio. At playback the
+page reads that back in step with the player's own clock. No FFT runs in the
+browser at all.
+
+The envelopes live in a separate repository,
+[mashMusic-eq](https://github.com/Ryzzuh/mashMusic-eq), published as its own
+Pages site and fetched from `../mashMusic-eq/`. Tracks without one fall back to
+a flat display and say so.
+
+**Scrubber.** Draws its waveform from that same envelope, collapsed across all
+bands. Dragging previews without seeking; releasing commits it. For 200 ms after
+a seek it drops to a plain style rather than painting a waveform against a
+playhead that has not settled. It binds to both players — `getCurrentTime` and
+`seekTo` for YouTube, the widget's callback-style equivalents for SoundCloud.
+
 **Contributors panel.** The ⓘ beside the track count opens a ranked list of the
 71 people who posted these tracks. Beau Garcia alone accounts for 330 of them.
 
@@ -59,7 +81,7 @@ app.css               both themes, as complete token sets
 app.js                list, transport, liveness, players
 data/tracks.js        1,257 tracks, loaded via <script> so file:// works
 data/liveness.json    optional offline verdicts, merged on load
-tools/                data pipeline and the liveness checker
+tools/                data pipelines, liveness checker, dev server
 legacy/               the 2015 AngularJS app, untouched
 ```
 
@@ -78,7 +100,22 @@ it learned at runtime.
 YOUTUBE_API_KEY=... node tools/check-liveness.mjs
 ```
 
-Both endpoints are CORS-blocked from the browser, which is why this runs
+**`tools/build-envelopes.py`** produces the spectral envelopes described above,
+writing to the sibling `mashMusic-eq` checkout. It is resumable, skipping ids
+that already have a file, and one dead track never stops the run.
+
+```bash
+uv run --python 3.12 --with yt-dlp --with av --with numpy \
+    python tools/build-envelopes.py --workers 6
+```
+
+**`tools/serve.py`** is a static server for development. It differs from
+`python3 -m http.server` in two ways that matter: it sends `Cache-Control:
+no-store`, because the stdlib server sends none and browsers will happily serve
+a stale `app.js` while you debug it; and it maps `/mashMusic-eq/` to the sibling
+checkout, so local paths match the published ones exactly.
+
+Both liveness endpoints are CORS-blocked from the browser, which is why this runs
 offline; the YouTube key must not ship to the client in any case. YouTube's
 `videos.list` accepts 50 IDs per request and costs 1 quota unit per call
 regardless, so the whole library is about 19 units against a 10,000/day free
@@ -91,9 +128,20 @@ the app keeps learning from playback either way.
 
 ## Known limits
 
-The equalizer you might expect next isn't possible over these players. Both are
-cross-origin iframes, and Web Audio can only analyse a source the page owns — a
-decoded buffer, a same-origin media element, or a `MediaStream`. Nothing
-reaches inside a third-party iframe's audio. Capturing the tab with
-`getDisplayMedia({audio: true})` does work, at the cost of a permission prompt
-every session and Chrome-or-Edge only.
+**Analysis is not live.** The spectrum is a recording of what the audio looked
+like, replayed against the player's clock, so it is only as accurate as that
+clock — which resolves to about a quarter second and is interpolated in between.
+It cannot react to anything the analysis did not see: a different upload of the
+same video, an ad, or YouTube's own volume normalisation.
+
+**Roughly a third of the library is gone.** The full analysis run found ~34% of
+YouTube ids unavailable, which is worse than a 120-track sample had suggested
+(~24%). Those tracks get no envelope and are skipped during autoplay.
+
+**SoundCloud has no envelopes.** The pipeline is YouTube-only for now. The
+scrubber still works there — it just stays in its plain style.
+
+The genuinely live alternative, capturing the tab with
+`getDisplayMedia({audio: true})`, does work, but costs a permission prompt every
+session and is Chrome-or-Edge only. Precomputing is cheaper for the viewer and
+needs nothing from them.

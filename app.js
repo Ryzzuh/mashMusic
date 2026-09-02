@@ -268,9 +268,10 @@
           if (e.data === YT.PlayerState.PLAYING) {
             clearTimeout(watchdog);
             state.playing = true;
+            anchorClock();
             if (state.current) markLivenessOk(state.current);
           }
-          if (e.data === YT.PlayerState.PAUSED) state.playing = false;
+          if (e.data === YT.PlayerState.PAUSED) { state.playing = false; anchorClock(); }
         },
         onError: (e) => {
           clearTimeout(watchdog);
@@ -388,6 +389,7 @@
     $("npFlags").innerHTML = "";
 
     markCurrentRow(track);
+    loadEnvelope(track);
 
     clearTimeout(watchdog);
     // If nothing has started within 9s, the embed is silently broken.
@@ -472,6 +474,13 @@
     state.current = null;
     listEl.querySelectorAll('.trow[aria-current="true"]').forEach((r) => r.removeAttribute("aria-current"));
     showSlot("idle");
+    eqData = null;
+    clockAnchor = null;
+    mediaDuration = 0;
+    scrubWave = null;
+    scrubDrag = null;
+    lastTimeLabel = "";
+    setEqTag("no envelope", false);
     $("npSource").textContent = "—";
     $("npTitle").textContent = "Nothing playing";
     $("npSub").textContent = TRACKS.length.toLocaleString() + " tracks, posted by friends between 2012 and 2015.";
@@ -489,6 +498,423 @@
     e.currentTarget.setAttribute("aria-pressed", String(state.favsOnly));
     render(true);
   });
+
+  // ---------------------------------------------------------- equalizer
+  //
+  // Web Audio cannot reach inside the YouTube iframe, so nothing here
+  // analyses audio. tools/build-envelopes.py did that offline; this reads
+  // the result back in step with the player's own clock.
+
+  const eqCanvas = $("eqScope");
+  const eqCtx = eqCanvas.getContext("2d");
+
+  // Envelopes live in the sibling mashMusic-eq repo, published as its own Pages
+  // site. "../" resolves to /mashMusic-eq/ both from /mashMusic/ in production
+  // and from / on a local server, since browsers clamp ".." at the root.
+  const EQ_BASE = "../mashMusic-eq/";
+
+  const EQ_TILT = 2.6;              // dB per octave above 200 Hz
+  const EQ_ATTACK = 0.55;
+  const EQ_RELEASE = 0.11;
+
+  let eqIndex = null;               // ids that have an envelope
+  let eqData = null;                // decoded header + body of the current track
+  let eqToken = 0;                  // guards against a slow fetch landing late
+  let eqLevels = null, eqPeaks = null, eqPeakVel = null, eqHold = null;
+  let clockAnchor = null;           // { media, wall } — re-taken 4x a second
+  let mediaDuration = 0;
+  let eqRaf = 0, eqLastT = 0;
+
+  // Scrubber. Its waveform is the same envelope the spectrum reads, collapsed
+  // across bands. After a seek it drops to the plain style briefly, so it never
+  // paints a waveform against a playhead that has not settled yet.
+  const SCRUB_QUIET_MS = 200;
+  const scrubCanvas = $("scrubber");
+  const sCtx = scrubCanvas.getContext("2d");
+  let scrubW = 0, scrubH = 0;
+  let scrubWave = null;             // per-pixel peak, or null for the plain style
+  let scrubDrag = null;             // seconds while dragging, else null
+  let scrubQuietUntil = 0;
+  let lastTimeLabel = "";
+
+  // Same geometric spacing the analyser used, for the tilt curve.
+  function bandCentres(n, fLo, fHi) {
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const lo = fLo * Math.pow(fHi / fLo, i / n);
+      const hi = fLo * Math.pow(fHi / fLo, (i + 1) / n);
+      out[i] = Math.sqrt(lo * hi);
+    }
+    return out;
+  }
+  let eqCentres = bandCentres(24, 40, 16000);
+
+  let EQC = {};
+  function readEqColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const rgb = (name, fb) => {
+      const m = /^#([0-9a-f]{6})$/i.exec(cs.getPropertyValue(name).trim());
+      if (!m) return fb;
+      const h = m[1];
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+    };
+    EQC = {
+      lo: rgb("--eq-lo", [80, 192, 176]),
+      mid: rgb("--eq-mid", [72, 192, 224]),
+      hi: rgb("--eq-hi", [240, 144, 24]),
+      grid: (cs.getPropertyValue("--line").trim() || "#d8dcef"),
+      cap: (cs.getPropertyValue("--ink-3").trim() || "#8f95b8")
+    };
+  }
+  readEqColors();
+  new MutationObserver(() => { readEqColors(); readScrubColors(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-skin"] });
+
+  function eqRamp(v) {
+    const a = v < 0.6 ? EQC.lo : EQC.mid;
+    const b = v < 0.6 ? EQC.mid : EQC.hi;
+    const u = v < 0.6 ? v / 0.6 : Math.min(1, (v - 0.6) / 0.4);
+    return "rgb(" + Math.round(a[0] + (b[0] - a[0]) * u) + ","
+                  + Math.round(a[1] + (b[1] - a[1]) * u) + ","
+                  + Math.round(a[2] + (b[2] - a[2]) * u) + ")";
+  }
+
+  let eqW = 0, eqH = 0;
+  function eqResize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const r = eqCanvas.getBoundingClientRect();
+    eqW = Math.max(1, Math.round(r.width));
+    eqH = Math.max(1, Math.round(r.height));
+    eqCanvas.width = Math.round(eqW * dpr);
+    eqCanvas.height = Math.round(eqH * dpr);
+    eqCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(eqResize).observe(eqCanvas);
+
+  function setEqTag(text, live) {
+    const el = $("eqTag");
+    el.textContent = text;
+    el.classList.toggle("live", !!live);
+  }
+
+  async function loadEqIndex() {
+    try {
+      const res = await fetch(EQ_BASE + "index.json", { cache: "no-store" });
+      if (!res.ok) return;
+      const meta = await res.json();
+      eqIndex = new Set(meta.ids || []);
+      if (meta.bands) eqCentres = bandCentres(meta.bands, 40, 16000);
+    } catch (e) {
+      /* no envelopes published yet — the strip just stays idle */
+    }
+  }
+
+  function allocBands(n) {
+    if (!eqLevels || eqLevels.length !== n) {
+      eqLevels = new Float32Array(n);
+      eqPeaks = new Float32Array(n);
+      eqPeakVel = new Float32Array(n);
+      eqHold = new Float32Array(n);
+    }
+  }
+
+  async function loadEnvelope(track) {
+    const token = ++eqToken;
+    eqData = null;
+    clockAnchor = null;
+    mediaDuration = 0;
+    scrubWave = null;
+    scrubDrag = null;
+    lastTimeLabel = "";
+
+    if (!track || track.s !== "YT" || !eqIndex || !eqIndex.has(track.i)) {
+      setEqTag(track && track.s === "SC" ? "soundcloud — no envelope" : "no envelope", false);
+      return;
+    }
+    setEqTag("loading", false);
+    try {
+      const res = await fetch(EQ_BASE + track.i + ".bin");
+      if (!res.ok) throw new Error(res.status);
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (token !== eqToken) return;                     // superseded by a newer track
+
+      if (String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) !== "MEQ1") {
+        throw new Error("bad magic");
+      }
+      const bands = buf[4], fps = buf[5], frames =
+        buf[8] | (buf[9] << 8) | (buf[10] << 16) | (buf[11] << 24);
+      const stride = (bands + 1) >> 1;
+
+      eqData = { bands, fps, frames, stride, body: buf.subarray(16) };
+      allocBands(bands);
+      eqCentres = bandCentres(bands, 40, 16000);
+      buildScrubWave();
+      setEqTag(bands + " bands · " + fps + " fps", true);
+    } catch (e) {
+      eqData = null;
+      setEqTag("no envelope", false);
+    }
+  }
+
+  // The player's clock only resolves to about a quarter second, so sample it
+  // periodically and run a local clock in between.
+  function anchorClock() {
+    const track = state.current;
+    if (!track) return;
+    const ok = (v) => typeof v === "number" && isFinite(v) && v >= 0;
+    try {
+      if (track.s === "YT" && yt && ytReady) {
+        const pos = yt.getCurrentTime(), dur = yt.getDuration();
+        if (ok(pos)) clockAnchor = { media: pos, wall: performance.now() };
+        if (ok(dur) && dur > 0) mediaDuration = dur;
+      } else if (track.s === "SC" && sc && scReady) {
+        // The widget answers by callback rather than return value.
+        sc.getPosition((ms) => {
+          if (ok(ms)) clockAnchor = { media: ms / 1000, wall: performance.now() };
+        });
+        sc.getDuration((ms) => { if (ok(ms) && ms > 0) mediaDuration = ms / 1000; });
+      }
+    } catch (e) { /* player not ready yet */ }
+  }
+
+  // Player-reported duration when we have it, dataset duration until then.
+  function currentDuration() {
+    return mediaDuration || (state.current ? state.current.d : 0) || 0;
+  }
+
+  function seekMedia(seconds) {
+    const track = state.current;
+    if (!track) return;
+    const dur = currentDuration();
+    const target = Math.max(0, dur ? Math.min(dur, seconds) : seconds);
+
+    if (track.s === "YT" && yt && ytReady) yt.seekTo(target, true);
+    else if (track.s === "SC" && sc && scReady) sc.seekTo(target * 1000);
+    else return;
+
+    // Move the clock immediately rather than waiting for the next poll, so the
+    // spectrum resumes from the right place instead of replaying stale frames.
+    clockAnchor = { media: target, wall: performance.now() };
+    scrubQuietUntil = performance.now() + SCRUB_QUIET_MS;
+  }
+  setInterval(anchorClock, 250);
+
+  function mediaTime() {
+    if (!clockAnchor) return 0;
+    if (!state.playing) return clockAnchor.media;
+    return clockAnchor.media + (performance.now() - clockAnchor.wall) / 1000;
+  }
+
+  // Two frames either side of the playhead, linearly blended.
+  function sampleEnvelope(seconds, out) {
+    const { bands, fps, frames, stride, body } = eqData;
+    const pos = seconds * fps;
+    let i0 = Math.floor(pos);
+    if (i0 < 0) i0 = 0;
+    if (i0 > frames - 1) i0 = frames - 1;
+    const i1 = Math.min(frames - 1, i0 + 1);
+    const mix = Math.min(1, Math.max(0, pos - i0));
+    const o0 = i0 * stride, o1 = i1 * stride;
+
+    for (let i = 0; i < bands; i++) {
+      const shift = (i & 1) ? 4 : 0;
+      const a = ((body[o0 + (i >> 1)] >> shift) & 0x0F) / 15;
+      const b = ((body[o1 + (i >> 1)] >> shift) & 0x0F) / 15;
+      let v = a + (b - a) * mix;
+      // stored untilted: 1.0 is the track peak, 0 is 60 dB below it
+      const db = (v - 1) * 60 + EQ_TILT * Math.log2(Math.max(eqCentres[i], 40) / 200);
+      v = db / 60 + 1;
+      out[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+    }
+  }
+
+  let SCOL = {};
+  function readScrubColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n, fb) => cs.getPropertyValue(n).trim() || fb;
+    SCOL = {
+      track: v("--line", "#d8dcef"),
+      played: v("--accent", "#28b0c0"),
+      head: v("--ink", "#161a22"),
+      ahead: v("--line-hard", "#b6bcdd")
+    };
+  }
+  readScrubColors();
+
+  function scrubResize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const r = scrubCanvas.getBoundingClientRect();
+    scrubW = Math.max(1, Math.round(r.width));
+    scrubH = Math.max(1, Math.round(r.height));
+    scrubCanvas.width = Math.round(scrubW * dpr);
+    scrubCanvas.height = Math.round(scrubH * dpr);
+    sCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    buildScrubWave();
+  }
+  new ResizeObserver(scrubResize).observe(scrubCanvas);
+
+  // Collapse the envelope to one peak per pixel column.
+  function buildScrubWave() {
+    if (!eqData || scrubW < 2) { scrubWave = null; return; }
+    const { bands, frames, stride, body } = eqData;
+    const out = new Float32Array(scrubW);
+    let mx = 0;
+    for (let x = 0; x < scrubW; x++) {
+      const f0 = Math.floor(x * frames / scrubW);
+      const f1 = Math.max(f0 + 1, Math.floor((x + 1) * frames / scrubW));
+      const step = Math.max(1, Math.floor((f1 - f0) / 16));   // subsample long spans
+      let peak = 0;
+      for (let f = f0; f < f1; f += step) {
+        const o = f * stride;
+        let sum = 0;
+        for (let i = 0; i < bands; i++) {
+          sum += (body[o + (i >> 1)] >> ((i & 1) ? 4 : 0)) & 0x0F;
+        }
+        const v = sum / (bands * 15);
+        if (v > peak) peak = v;
+      }
+      out[x] = peak;
+      if (peak > mx) mx = peak;
+    }
+    if (mx > 0) for (let x = 0; x < scrubW; x++) out[x] /= mx;
+    scrubWave = out;
+  }
+
+  function drawScrubber() {
+    const W = scrubW, H = scrubH;
+    if (W < 2) return;
+    sCtx.clearRect(0, 0, W, H);
+
+    const dur = currentDuration();
+    const pos = scrubDrag != null ? scrubDrag : Math.min(mediaTime(), dur || Infinity);
+    const frac = dur > 0 ? Math.max(0, Math.min(1, pos / dur)) : 0;
+    const mid = H / 2;
+
+    // The 200 ms after a seek deliberately shows the plain style.
+    const quiet = performance.now() < scrubQuietUntil;
+
+    if (scrubWave && !quiet) {
+      for (let x = 0; x < W; x++) {
+        const v = scrubWave[Math.min(scrubWave.length - 1, x)];
+        const h = Math.max(1, v * (H - 6));
+        sCtx.fillStyle = x / W <= frac ? SCOL.played : SCOL.ahead;
+        sCtx.fillRect(x, mid - h / 2, 1, h);
+      }
+    } else {
+      sCtx.fillStyle = SCOL.track;
+      sCtx.fillRect(0, mid - 2, W, 4);
+      sCtx.fillStyle = SCOL.played;
+      sCtx.fillRect(0, mid - 2, W * frac, 4);
+    }
+
+    if (state.current) {
+      sCtx.fillStyle = SCOL.head;
+      sCtx.fillRect(Math.max(0, Math.min(W - 2, W * frac - 1)), 1, 2, H - 2);
+    }
+
+    const label = fmtDur(Math.round(pos)) + "|" + fmtDur(Math.round(dur));
+    if (label !== lastTimeLabel) {          // touch the DOM only when it changes
+      lastTimeLabel = label;
+      const parts = label.split("|");
+      $("scrubNow").textContent = state.current ? parts[0] : "0:00";
+      $("scrubEnd").textContent = parts[1];
+      scrubCanvas.setAttribute("aria-valuemax", String(Math.round(dur)));
+      scrubCanvas.setAttribute("aria-valuenow", String(Math.round(pos)));
+      scrubCanvas.setAttribute("aria-valuetext", parts[0] + " of " + parts[1]);
+    }
+  }
+
+  const scrubTimeAt = (e) => {
+    const r = scrubCanvas.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    return frac * currentDuration();
+  };
+
+  scrubCanvas.addEventListener("pointerdown", (e) => {
+    if (!state.current || !currentDuration()) return;
+    try { scrubCanvas.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ }
+    scrubDrag = scrubTimeAt(e);
+  });
+  scrubCanvas.addEventListener("pointermove", (e) => {
+    if (scrubDrag != null) scrubDrag = scrubTimeAt(e);
+  });
+  scrubCanvas.addEventListener("pointerup", (e) => {
+    if (scrubDrag == null) return;
+    const target = scrubTimeAt(e);
+    scrubDrag = null;
+    seekMedia(target);
+  });
+  scrubCanvas.addEventListener("pointercancel", () => { scrubDrag = null; });
+
+  scrubCanvas.addEventListener("keydown", (e) => {
+    if (!state.current) return;
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    e.stopPropagation();               // keep it off the track-skip shortcuts
+    const delta = e.key === "ArrowRight" ? 5 : -5;
+    seekMedia(mediaTime() + delta);
+  });
+
+  function eqFrame(now) {
+    eqRaf = requestAnimationFrame(eqFrame);
+    const dt = Math.min(0.05, (now - eqLastT) / 1000) || 0.016;
+    eqLastT = now;
+
+    eqCtx.clearRect(0, 0, eqW, eqH);
+
+    const active = eqData && state.current && state.playing;
+    const n = eqData ? eqData.bands : 24;
+    allocBands(n);
+
+    if (active) {
+      const target = new Float32Array(n);
+      sampleEnvelope(mediaTime(), target);
+      for (let i = 0; i < n; i++) {
+        const v = target[i];
+        const k = v > eqLevels[i] ? EQ_ATTACK : EQ_RELEASE;
+        eqLevels[i] += (v - eqLevels[i]) * k;
+      }
+    } else {
+      for (let i = 0; i < n; i++) eqLevels[i] *= 0.88;
+    }
+
+    for (let i = 0; i < n; i++) {
+      if (eqLevels[i] >= eqPeaks[i]) {
+        eqPeaks[i] = eqLevels[i];
+        eqPeakVel[i] = 0;
+        eqHold[i] = 0.4;
+      } else if (eqHold[i] > 0) {
+        eqHold[i] -= dt;
+      } else {
+        eqPeakVel[i] += 1.5 * dt;
+        eqPeaks[i] = Math.max(eqLevels[i], eqPeaks[i] - eqPeakVel[i] * dt);
+      }
+    }
+
+    const padX = 12, floorY = eqH - 8, topY = 10;
+    const usable = floorY - topY;
+    const gap = 3;
+    const bw = Math.max(2, (eqW - padX * 2 - gap * (n - 1)) / n);
+
+    eqCtx.fillStyle = EQC.grid;
+    eqCtx.fillRect(padX, floorY + 1, eqW - padX * 2, 1);
+
+    for (let i = 0; i < n; i++) {
+      const v = eqLevels[i];
+      const x = padX + i * (bw + gap);
+      const h = v * usable;
+      if (h > 0.7) {
+        eqCtx.fillStyle = eqRamp(v);
+        eqCtx.fillRect(x, floorY - h, bw, h);
+      }
+      if (eqPeaks[i] > 0.02) {
+        eqCtx.fillStyle = EQC.cap;
+        eqCtx.fillRect(x, floorY - eqPeaks[i] * usable - 2, bw, 1.5);
+      }
+    }
+
+    drawScrubber();
+  }
 
   // ------------------------------------------------------- contributors
 
@@ -588,6 +1014,11 @@
 
   render(true);
   mergeOfflineLiveness();
+  loadEqIndex();
+  eqResize();
+  scrubResize();
+  eqLastT = performance.now();
+  eqRaf = requestAnimationFrame(eqFrame);
 
   loadScript("https://www.youtube.com/iframe_api");
   loadScript("https://w.soundcloud.com/player/api.js");
