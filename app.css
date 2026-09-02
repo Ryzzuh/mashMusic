@@ -236,7 +236,9 @@ main {
 .stage {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr);
-  gap: 22px;
+  /* column gap matches the vertical distance from the video to the scrubber
+     canvas below it, so the spacing around the video reads as even */
+  gap: 22px 33px;
   align-items: stretch;
   padding: 22px;
   background: var(--stage-bg);
