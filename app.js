@@ -371,6 +371,43 @@
     $("npFlags").innerHTML = `<span class="flag flag-${kind}">${label}</span>`;
   }
 
+  /* Cover art. We hold a thumbnail url for 1,248 of the 1,257 tracks, but the
+   * stored ones are small — YouTube's default.jpg is 120x90, SoundCloud's
+   * -large.jpg is 100px. Both have bigger variants at predictable urls, so ask
+   * for those first and fall back to the stored one. */
+  function artUrl(track) {
+    if (track.s === "YT") return "https://i.ytimg.com/vi/" + track.i + "/hqdefault.jpg";
+    if (track.a) return track.a.replace(/-large\.jpg$/, "-t500x500.jpg");
+    return "";
+  }
+
+  function setArtwork(track) {
+    const panel = $("artPanel"), img = $("artImg");
+    const first = track ? artUrl(track) : "";
+    if (!first) { panel.hidden = true; img.removeAttribute("src"); return; }
+
+    const stored = track.a && track.a !== first ? track.a : null;
+    let triedStored = false;
+
+    img.onload = () => {
+      // YouTube answers 200 with a 120x90 grey placeholder for videos it has
+      // lost, so size is the only way to tell a real thumbnail from a stub.
+      if (img.naturalWidth && img.naturalWidth < 200) {
+        if (stored && !triedStored) { triedStored = true; img.src = stored; return; }
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+    };
+    img.onerror = () => {
+      if (stored && !triedStored) { triedStored = true; img.src = stored; return; }
+      panel.hidden = true;
+      img.removeAttribute("src");
+    };
+
+    img.src = first;
+  }
+
   function showSlot(which) {
     $("slotYT").hidden = which !== "YT";
     $("slotSC").hidden = which !== "SC";
@@ -389,6 +426,7 @@
     $("npFlags").innerHTML = "";
 
     markCurrentRow(track);
+    setArtwork(track);
     loadEnvelope(track);
 
     clearTimeout(watchdog);
@@ -474,6 +512,7 @@
     state.current = null;
     listEl.querySelectorAll('.trow[aria-current="true"]').forEach((r) => r.removeAttribute("aria-current"));
     showSlot("idle");
+    setArtwork(null);
     eqData = null;
     clockAnchor = null;
     mediaDuration = 0;

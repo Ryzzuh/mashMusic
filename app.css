@@ -283,6 +283,9 @@ main {
   justify-content: center;
   background: var(--sunk);
 }
+/* This id selector outranks .media-slot[hidden], so restate the hide here or
+   the widget stays on screen through YouTube tracks. */
+#slotSC[hidden] { display: none; }
 #slotSC iframe {
   width: 100%;
   height: 166px;          /* the classic widget's own height */
@@ -757,6 +760,31 @@ main {
 }
 
 /* ---------- spectrum ---------- */
+
+/* cover tile + spectrum share the bottom third of the side column */
+.stage-strip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.art {
+  aspect-ratio: 1;
+  height: 100%;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.art[hidden] { display: none; }   /* spectrum takes the full width instead */
+.art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 
 .eq {
   position: relative;
