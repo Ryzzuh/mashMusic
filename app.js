@@ -298,7 +298,7 @@
 
   const scWidgetUrl = (id) =>
     "https://w.soundcloud.com/player/?url=" + encodeURIComponent(scTrackUrl(id)) +
-    "&auto_play=true&visual=false&hide_related=true&show_comments=false&color=%2328b0c0";
+    "&auto_play=true&visual=false&hide_related=true&show_comments=false&show_artwork=false&color=%2328b0c0";
 
   /* SC.Widget() can only attach to an iframe that is already pointed at a
    * widget URL, so the first SoundCloud track is played by setting src and

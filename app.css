@@ -286,6 +286,16 @@ main {
   border: 0;
 }
 
+/* SoundCloud ships no dark widget — passing theme/dark/color_scheme changes
+   nothing, the root is always g-background-default on rgb(245,245,245). So in
+   Night Dial only, invert lightness while preserving hue. Scoped deliberately:
+   unscoped it puts a black slab on Jukebox's near-white panel. The widget is
+   requested with show_artwork=false because inverting a cover renders it as a
+   photographic negative. */
+html[data-skin="night"] #slotSC iframe {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 .media-idle {
   display: flex;
   flex-direction: column;
