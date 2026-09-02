@@ -16,43 +16,47 @@
 }
 
 html[data-skin="jukebox"] {
-  --ground:      #ffffff;
-  --panel:       #ffffff;
-  --sunk:        #f2fafd;
-  --raised:      #ffffff;
+  /* Sampled from data/jukebox.jpg — a Wurlitzer 1015. Polished mahogany in
+     near-darkness, lit by magenta, amber, green, cyan and violet neon. */
+  --ground:      #120a07;   /* the room around the cabinet */
+  --panel:       #1e100a;   /* polished mahogany face */
+  --sunk:        #0d0705;   /* recessed, behind the glass */
+  --raised:      #2a1710;
 
-  --ink:         #283088;   /* next-button indigo, used as the ink */
-  --ink-2:       #5c6499;
-  --ink-3:       #8f95b8;
-  --ink-on-tint: #12173f;
+  --ink:         #ead2ae;   /* ivory highlight off the arch */
+  --ink-2:       #b08f68;
+  --ink-3:       #9d8064;
+  --ink-on-tint: #1b0a04;
 
-  --line:        #d8dcef;
-  --line-hard:   #b6bcdd;
+  --line:        #331c12;   /* wood seam */
+  --line-hard:   #4d2c1c;
 
-  --accent:      #28b0c0;   /* play, shade */
-  --accent-lift: #48c0e0;   /* play, face */
-  --tint:        #9ddefa;   /* the original NowPlaying panel */
-  --tint-soft:   #e4f5fe;
-  --check:       #f8f078;   /* the original "checked" yellow */
-  --check-ink:   #4a4408;
+  --accent:      #fa1768;   /* the magenta arch */
+  --accent-lift: #ff4f8d;
+  --tint:        #eba233;   /* the amber arch */
+  --tint-soft:   #2a1408;
+  --check:       #eba233;
+  --check-ink:   #1b0a04;
 
-  --ok:          #389040;
-  --warn:        #e07020;
-  --dead:        #a04888;
+  --ok:          #1cd320;   /* the MAKE SELECTION button */
+  --warn:        #eba233;
+  --dead:        #a05ffb;   /* violet pilaster */
 
-  --c-prev:      #c068a8;
-  --c-play:      #48c0e0;
-  --c-pause:     #f09018;
-  --c-next:      #283088;
-  --c-stop:      #50c0b0;
-  --c-random:    #48b848;
-  --c-heart:     #40b8e8;
+  /* each transport control keeps its own colour, now drawn from the tubes */
+  --c-prev:      #a05ffb;
+  --c-play:      #1cd320;
+  --c-pause:     #eba233;
+  --c-next:      #fa1768;
+  --c-stop:      #1aeac6;
+  --c-random:    #c4d63d;
+  --c-heart:     #fa1768;
 
-  --eq-lo:       #50c0b0;   /* stop teal */
-  --eq-mid:      #48c0e0;   /* play blue */
-  --eq-hi:       #f09018;   /* pause orange */
-  --shadow:      0 1px 0 var(--line), 0 10px 24px -18px rgba(40,48,136,.5);
-  --stage-bg:    linear-gradient(180deg, #eaf7fe, #ffffff 70%);
+  --eq-lo:       #1aeac6;
+  --eq-mid:      #eba233;
+  --eq-hi:       #fa1768;
+
+  --shadow:      0 1px 0 var(--line), 0 14px 34px -20px #000;
+  --stage-bg:    radial-gradient(120% 90% at 50% 0%, #2e170e 0%, #120a07 72%);
   --blur-amount: 5px;
 }
 
@@ -291,8 +295,8 @@ main {
    Night Dial only, invert lightness while preserving hue. Scoped deliberately:
    unscoped it puts a black slab on Jukebox's near-white panel. The widget is
    requested with show_artwork=false because inverting a cover renders it as a
-   photographic negative. */
-html[data-skin="night"] #slotSC iframe {
+   photographic negative. Both skins are dark, so this is unconditional. */
+#slotSC iframe {
   filter: invert(1) hue-rotate(180deg);
 }
 

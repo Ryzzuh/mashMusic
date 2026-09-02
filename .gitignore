@@ -48,3 +48,8 @@ __pycache__/
 
 # screen recordings dropped in for debugging
 *.mov
+
+# reference media dropped into data/ for sampling, not part of the site
+data/*.jpg
+data/*.jpeg
+data/*.png
