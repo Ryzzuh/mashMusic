@@ -527,7 +527,10 @@
   // — an ad, or a different upload. getDuration() reports whatever is actually
   // loaded, so it stops matching the envelope's own length.
   let contentMismatch = false;
-  const CONTENT_TOLERANCE = 2.0;   // seconds; a real match agrees within ~0.15
+  // Generous by design: across 633 envelopes the largest honest disagreement
+  // with the real duration was 3.9 s, while an ad differs by whole minutes.
+  const contentTolerance = (secs) => Math.max(5, secs * 0.02);
+  let mismatchStrikes = 0;
   let eqRaf = 0, eqLastT = 0;
 
   // Scrubber. Its waveform is the same envelope the spectrum reads, collapsed
@@ -629,6 +632,7 @@
     clockAnchor = null;
     mediaDuration = 0;
     contentMismatch = false;
+    mismatchStrikes = 0;
     scrubWave = null;
     scrubDrag = null;
     lastTimeLabel = "";
@@ -674,7 +678,9 @@
         const pos = yt.getCurrentTime(), dur = yt.getDuration();
         if (ok(dur) && dur > 0 && eqData) {
           const was = contentMismatch;
-          contentMismatch = Math.abs(dur - eqData.seconds) > CONTENT_TOLERANCE;
+          const off = Math.abs(dur - eqData.seconds) > contentTolerance(eqData.seconds);
+          mismatchStrikes = off ? mismatchStrikes + 1 : 0;
+          contentMismatch = mismatchStrikes >= 2;
           if (contentMismatch !== was) {
             setEqTag(contentMismatch
               ? "paused — ad or different cut"
@@ -811,7 +817,7 @@
     // The 200 ms after a seek deliberately shows the plain style.
     const quiet = performance.now() < scrubQuietUntil;
 
-    if (scrubWave && !quiet && !contentMismatch) {
+    if (scrubWave && !quiet) {
       for (let x = 0; x < W; x++) {
         const v = scrubWave[Math.min(scrubWave.length - 1, x)];
         const h = Math.max(1, v * (H - 6));

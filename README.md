@@ -140,7 +140,16 @@ of the same video — it stops agreeing with the envelope's own length. When
 content really is playing the two agree to within about 0.15 s, against ads of
 5-30 s, so the test is not close. On a mismatch the spectrum flattens and says
 so rather than animating to audio nobody is hearing, and the scrubber keeps the
-content duration instead of rescaling itself to a 15-second pre-roll.
+content duration instead of rescaling itself to a 15-second pre-roll. The
+waveform stays drawn throughout — it depicts the track, not what is currently
+audible, so it remains true during an ad.
+
+The tolerance is deliberately loose: envelope length comes from the audio
+stream, which can legitimately run a few seconds past the reported video
+duration. Across 633 envelopes the largest honest disagreement was 3.9 s, while
+an ad differs by whole minutes. A mismatch must also survive two consecutive
+polls, so one odd reading while the player re-buffers after a seek cannot
+blank anything.
 
 **Roughly a third of the library is gone.** The full analysis run found ~34% of
 YouTube ids unavailable, which is worse than a 120-track sample had suggested
