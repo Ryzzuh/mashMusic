@@ -77,6 +77,36 @@ export async function playFirstMatch(page, term) {
   return key;
 }
 
+/** Is the element actually painted and hittable where it claims to be?
+ *
+ * Playwright's toBeVisible() checks bounding box and computed styles, which
+ * does NOT model clipping by an ancestor's overflow. A menu inside an
+ * overflow:hidden container passes toBeVisible() while being invisible to the
+ * user; elementFromPoint is what catches that. */
+export function isHittable(page, selector) {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return { ok: false, why: "no element" };
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return { ok: false, why: "zero size" };
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return {
+      ok: !!hit && (hit === el || el.contains(hit) || hit.contains(el)),
+      why: hit ? hit.tagName + "." + (hit.className || "") : "nothing at that point",
+    };
+  }, selector);
+}
+
+/** Set the list-visibility mode through the picker UI. */
+export async function setListMode(page, mode) {
+  if (mode === "show") {
+    await page.click("#listModeCurrent");
+    return;
+  }
+  await page.click("#listModeMore");
+  await page.click(`.listmode-menu [data-listmode="${mode}"]`);
+}
+
 /** Bounding rects for several selectors at once. */
 export function rects(page, selectors) {
   return page.evaluate((sels) => {

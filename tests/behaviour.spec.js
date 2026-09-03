@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { blockExternal, playFirstMatch } from "./helpers.js";
+import { blockExternal, playFirstMatch, setListMode } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await blockExternal(page);
@@ -25,7 +25,7 @@ test("the SoundCloud slot hides when a YouTube track takes over", async ({ page 
 
 test("hidden list mode keeps titles out of the DOM entirely", async ({ page }) => {
   await page.goto("/");
-  await page.click('[data-listmode="hide"]');
+  await setListMode(page, "hide");
 
   const leaked = await page.evaluate(() => {
     const html = document.getElementById("tracklist").innerHTML;
@@ -92,7 +92,7 @@ test("both themes expose a full token set", async ({ page }) => {
     "--stage-bg", "--shadow",
   ];
   for (const skin of ["jukebox", "night"]) {
-    await page.click(`[data-skin="${skin}"]`);
+    await page.click(`button[data-skin="${skin}"]`);
     const missing = await page.evaluate((names) => {
       const cs = getComputedStyle(document.documentElement);
       return names.filter((n) => !cs.getPropertyValue(n).trim());

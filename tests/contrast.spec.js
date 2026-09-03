@@ -17,7 +17,7 @@ test("every ink-on-surface pair meets WCAG AA in both themes", async ({ page }) 
   await page.goto("/");
 
   for (const skin of ["jukebox", "night"]) {
-    await page.click(`[data-skin="${skin}"]`);
+    await page.click(`button[data-skin="${skin}"]`);
     const results = await page.evaluate((pairs) => {
       const cs = getComputedStyle(document.documentElement);
       const rgb = (name) => {

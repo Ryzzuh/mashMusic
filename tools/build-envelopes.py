@@ -12,8 +12,8 @@ each — about 300 bytes per second of audio, or 122 KB for a typical track.
 Audio is streamed and decoded in memory and never written to disk. The output
 is a spectrum, not a recording, and cannot be inverted back into one.
 
-Output goes to the sibling mashMusic-eq repo: <videoId>.bin per track,
-plus index.json listing what exists.
+Output goes to the sibling mashMusic-eq repo: <trackId>.bin per track, for
+either source; plus index.json listing what exists.
 Resumable — tracks with an existing .bin are skipped.
 
 Format of a .bin, little-endian:
@@ -143,18 +143,25 @@ def pack(levels):
 
 # ------------------------------------------------------------------ fetching
 
-def audio_url(video_id):
+def source_url(track):
+    """yt-dlp resolves SoundCloud by its numeric api.soundcloud.com id, which is
+    what the 2015 dataset stores. Permalinks from that era no longer resolve."""
+    if track["s"] == "SC":
+        return "https://api.soundcloud.com/tracks/" + track["i"]
+    return "https://www.youtube.com/watch?v=" + track["i"]
+
+
+def audio_url(track):
     opts = {
         "quiet": True,
         "no_warnings": True,
         "format": "bestaudio/best",
         "skip_download": True,
         "noplaylist": True,
+        "socket_timeout": 30,
     }
     with yt_dlp.YoutubeDL(opts) as y:
-        info = y.extract_info(
-            "https://www.youtube.com/watch?v=" + video_id, download=False
-        )
+        info = y.extract_info(source_url(track), download=False)
     return info["url"], info
 
 
@@ -184,7 +191,7 @@ def process(track, force=False):
         return ("skip", vid, 0.0, os.path.getsize(dest))
 
     t0 = time.time()
-    url, _info = audio_url(vid)
+    url, _info = audio_url(track)
     pcm = decode(url)
     blob = pack(envelope(pcm))
 
@@ -227,13 +234,15 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="stop after N new tracks")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--force", action="store_true", help="rebuild existing")
-    ap.add_argument("--only", nargs="*", help="specific video ids")
+    ap.add_argument("--only", nargs="*", help="specific track ids")
+    ap.add_argument("--source", choices=["YT", "SC"], help="limit to one source")
     args = ap.parse_args()
 
     os.makedirs(OUTDIR, exist_ok=True)
     dead = load_dead()
 
-    tracks = [t for t in load_tracks() if t["s"] == "YT"]
+    tracks = [t for t in load_tracks()
+              if not args.source or t["s"] == args.source]
     if args.only:
         wanted = set(args.only)
         tracks = [t for t in tracks if t["i"] in wanted]

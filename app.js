@@ -479,7 +479,6 @@
         // Make sure the row exists before we try to highlight it.
         while (state.shown <= pos && state.shown < state.order.length) renderChunk();
         play(candidate);
-        rowFor(candidate.k)?.scrollIntoView({ block: "nearest" });
         return;
       }
     }
@@ -674,8 +673,8 @@
     scrubDrag = null;
     lastTimeLabel = "";
 
-    if (!track || track.s !== "YT" || !eqIndex || !eqIndex.has(track.i)) {
-      setEqTag(track && track.s === "SC" ? "soundcloud — no envelope" : "no envelope", false);
+    if (!track || !eqIndex || !eqIndex.has(track.i)) {
+      setEqTag("no envelope", false);
       return;
     }
     setEqTag("loading", false);
@@ -1037,15 +1036,54 @@
     searchTimer = setTimeout(() => { state.query = v; render(true); }, 140);
   });
 
-  document.querySelectorAll("[data-listmode]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.listMode = btn.dataset.listmode;
-      document.querySelectorAll("[data-listmode]").forEach((b) =>
-        b.setAttribute("aria-pressed", String(b === btn)));
-      prefs.listMode = state.listMode;
-      store.write(K_PREF, prefs);
-      render(false);
-    });
+  const LIST_MODE_LABEL = { show: "Shown", blur: "Obfuscated", hide: "Hidden" };
+  const listModeMenu = $("listModeMenu");
+  const listModeMore = $("listModeMore");
+
+  function openListMenu(open, restoreFocus) {
+    listModeMenu.hidden = !open;
+    listModeMore.setAttribute("aria-expanded", String(open));
+    // hiding the container while a menu item holds focus drops focus to <body>,
+    // which tabs the user straight past this control
+    if (!open && restoreFocus) listModeMore.focus();
+  }
+
+  function setListMode(mode, opts) {
+    if (!LIST_MODE_LABEL[mode]) mode = "show";      // a stray stored value
+    const silent = opts && opts.silent;
+    state.listMode = mode;
+
+    const pill = $("listModeCurrent");
+    pill.textContent = LIST_MODE_LABEL[mode];
+    pill.dataset.listmode = mode;
+    // not a toggle: it names the active mode and returns you to plain titles,
+    // so aria-pressed would announce the inverse of what is on screen
+    pill.classList.toggle("is-active", mode !== "show");
+    pill.title = mode === "show" ? "Titles are shown" : "Back to plain titles";
+    listModeMenu.querySelectorAll("[data-listmode]").forEach((b) =>
+      b.setAttribute("aria-current", String(b.dataset.listmode === mode)));
+
+    if (silent) return;
+    prefs.listMode = mode;
+    store.write(K_PREF, prefs);
+    openListMenu(false, true);
+    render(false);
+  }
+
+  // the visible pill names the active mode and clicking it returns to plain
+  $("listModeCurrent").addEventListener("click", () => setListMode("show"));
+  listModeMore.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openListMenu(listModeMenu.hidden);
+  });
+  listModeMenu.querySelectorAll("[data-listmode]").forEach((btn) => {
+    btn.addEventListener("click", () => setListMode(btn.dataset.listmode));
+  });
+  document.addEventListener("click", (e) => {
+    if (!listModeMenu.hidden && !e.target.closest(".listmode")) openListMenu(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !listModeMenu.hidden) openListMenu(false, true);
   });
 
   document.querySelectorAll("[data-skin]").forEach((btn) => {
@@ -1062,6 +1100,9 @@
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea")) return;
     if (contribModal.open) return;
+    if (!listModeMenu.hidden) return;          // the open picker owns the keys
+    // Space on a focused button must activate that button, not the transport
+    if (e.key === " " && e.target.matches("button")) return;
     if (e.key === "ArrowRight") { e.preventDefault(); next(); }
     if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
     if (e.key === " ") { e.preventDefault(); (state.playing ? $("bPause") : $("bPlay")).click(); }
@@ -1072,8 +1113,7 @@
   document.documentElement.dataset.skin = prefs.skin;
   document.querySelectorAll("button[data-skin]").forEach((b) =>
     b.setAttribute("aria-pressed", String(b.dataset.skin === prefs.skin)));
-  document.querySelectorAll("[data-listmode]").forEach((b) =>
-    b.setAttribute("aria-pressed", String(b.dataset.listmode === state.listMode)));
+  setListMode(state.listMode, { silent: true });
 
   $("npSub").textContent = TRACKS.length.toLocaleString() + " tracks, posted by friends between 2012 and 2015.";
   $("statNote").textContent = "liveness learned from playback";

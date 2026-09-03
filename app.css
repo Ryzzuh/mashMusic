@@ -205,7 +205,8 @@ button { font: inherit; color: inherit; }
   overflow: hidden;
   background: var(--sunk);
 }
-.switch button {
+.switch button,
+.listmode > button {
   appearance: none;
   border: 0;
   background: none;
@@ -220,13 +221,118 @@ button { font: inherit; color: inherit; }
   white-space: nowrap;
   transition: background .15s var(--ease), color .15s var(--ease);
 }
-.switch button + button { border-left: 1px solid var(--line); }
-.switch button:hover { color: var(--ink); }
-.switch button[aria-pressed="true"] {
+.switch button + button,
+.listmode > button + button { border-left: 1px solid var(--line); }
+.switch button:hover,
+.listmode > button:hover { color: var(--ink); }
+.switch button[aria-pressed="true"],
+.listmode > button.is-active {
   background: var(--check);
   color: var(--check-ink);
   font-weight: 500;
 }
+
+/* The list-mode control deliberately does NOT use .switch: that sets
+   overflow:hidden for its rounded corners, which clipped this menu away
+   entirely. Same look, own box, corners rounded per-child instead. */
+.listmode {
+  position: relative;
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--sunk);
+}
+.listmode > button:first-of-type {
+  border-radius: calc(var(--r) - 1px) 0 0 calc(var(--r) - 1px);
+}
+.listmode > button:last-of-type {
+  border-radius: 0 calc(var(--r) - 1px) calc(var(--r) - 1px) 0;
+}
+
+.listmode-more {
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+}
+.listmode-more svg {
+  width: 12px; height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .16s var(--ease);
+}
+.listmode-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+.listmode-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 132px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line-hard);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.listmode-menu[hidden] { display: none; }
+.listmode-menu button {
+  appearance: none;
+  border: 0;
+  height: auto;
+  background: none;
+  text-align: left;
+  padding: 9px 12px;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.listmode-menu button:hover { background: var(--sunk); color: var(--ink); }
+.listmode-menu button[aria-current="true"] { color: var(--accent); }
+
+/* a painter's palette straddling the divider between the two themes */
+.skin-switch { position: relative; }
+
+.skin-badge {
+  position: relative;
+  width: 0;
+  display: grid;
+  place-items: center;
+  z-index: 2;
+  pointer-events: none;
+}
+/* the span breaks button + button, so restate the divider it replaced */
+.skin-badge::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.skin-badge svg {
+  position: absolute;
+  width: 24px;
+  height: 20px;
+  overflow: visible;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .55));
+}
+.pal-body {
+  fill: var(--raised);
+  stroke: var(--line-hard);
+  stroke-width: 1;
+}
+.pal-drop { stroke: rgba(0, 0, 0, .25); stroke-width: .5; }
+.pal-a { fill: var(--accent); }
+.pal-b { fill: var(--tint); }
+.pal-c { fill: var(--ok); }
 
 /* ---------- stage ---------- */
 

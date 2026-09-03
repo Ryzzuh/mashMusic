@@ -27,6 +27,7 @@
     <symbol id="i-random" viewBox="0 0 24 24"><path d="M3 6.5h3.2c1.4 0 2.2.7 3 1.9l4.6 7.2c.8 1.2 1.6 1.9 3 1.9H21M3 17.5h3.2c1.4 0 2.2-.7 3-1.9l1.3-2M13.6 8.4l1.2-1.9c.8-1.2 1.6-1.9 3-1.9H21M18 2.5 21.5 6 18 9.5M18 14.5l3.5 3.5-3.5 3.5"/></symbol>
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.4 4.6 13c-2-2-2-5.2 0-7.2s5.2-2 7.2 0l.2.2.2-.2c2-2 5.2-2 7.2 0s2 5.2 0 7.2z"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 10.6v6.2"/><circle cx="12" cy="7.6" r="1.15"/></symbol>
+    <symbol id="i-caret" viewBox="0 0 24 24"><path d="M6 9.5 12 15.5 18 9.5"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16.2 16.2 21 21"/></symbol>
   </defs>
 </svg>
@@ -47,14 +48,36 @@
       <input type="search" id="search" placeholder="Search titles and posters" autocomplete="off" spellcheck="false">
     </label>
 
-    <div class="switch" role="group" aria-label="Track list visibility">
-      <button data-listmode="show" aria-pressed="true">Shown</button>
-      <button data-listmode="blur" aria-pressed="false">Obfuscated</button>
-      <button data-listmode="hide" aria-pressed="false">Hidden</button>
+    <div class="listmode" role="group" aria-label="Track list visibility">
+      <button class="listmode-current" id="listModeCurrent" data-listmode="show"
+              title="Back to plain titles">Shown</button>
+      <button class="listmode-more" id="listModeMore" aria-haspopup="true" aria-controls="listModeMenu"
+              aria-expanded="false" aria-label="Obfuscate or hide titles">
+        <svg aria-hidden="true"><use href="#i-caret"></use></svg>
+      </button>
+      <div class="listmode-menu" id="listModeMenu" hidden>
+        <button data-listmode="blur">Obfuscated</button>
+        <button data-listmode="hide">Hidden</button>
+      </div>
     </div>
 
-    <div class="switch" role="group" aria-label="Theme">
+    <div class="switch skin-switch" role="group" aria-label="Theme">
       <button data-skin="jukebox" aria-pressed="true">Jukebox</button>
+      <span class="skin-badge" aria-hidden="true">
+        <svg viewBox="0 0 32 26">
+          <defs>
+            <mask id="skinPaletteHole">
+              <rect width="32" height="26" fill="#fff"></rect>
+              <circle cx="11" cy="18" r="3.2" fill="#000"></circle>
+            </mask>
+          </defs>
+          <ellipse class="pal-body" cx="16" cy="13" rx="14.5" ry="11.5"
+                   mask="url(#skinPaletteHole)"></ellipse>
+          <circle class="pal-drop pal-a" cx="9"  cy="8" r="2.5"></circle>
+          <circle class="pal-drop pal-b" cx="16" cy="6" r="2.5"></circle>
+          <circle class="pal-drop pal-c" cx="23" cy="8" r="2.5"></circle>
+        </svg>
+      </span>
       <button data-skin="night" aria-pressed="false">Night Dial</button>
     </div>
   </div>

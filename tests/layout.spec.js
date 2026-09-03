@@ -44,7 +44,17 @@ test("the scrubber paints flush to the top of its canvas, with an envelope", asy
 });
 
 test("the scrubber paints flush to the top with no envelope either", async ({ page }) => {
-  await playFirstMatch(page, "Marek Hemmann - Left");   // a SoundCloud track
+  // Find a track that genuinely has no envelope rather than assuming a source
+  // has none — envelopes are still being generated for both.
+  const title = await page.evaluate(async () => {
+    const idx = await fetch("../mashMusic-eq/index.json").then((r) => r.json());
+    const have = new Set(idx.ids);
+    const t = window.MASH_TRACKS.find((x) => !have.has(x.i));
+    return t ? t.t : null;
+  });
+  test.skip(!title, "every track now has an envelope");
+
+  await playFirstMatch(page, title.slice(0, 30));
   await waitForCanvasPaint(page, "#scrubber");
 
   await expect(page.locator("#eqTag")).toHaveText(/no envelope/);
