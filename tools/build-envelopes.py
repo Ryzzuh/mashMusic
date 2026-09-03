@@ -292,7 +292,8 @@ def main():
         log("per track: %.1fs mean, %.1fs median (wall %.2fs/track at %d workers)"
             % (sum(times) / len(times), sorted(times)[len(times) // 2],
                elapsed / max(1, done), args.workers))
-    log("wrote %.1f MB across %d envelopes" % (total_bytes / 1024 / 1024, count))
+    log("wrote %.1f MB this run; %d envelopes now present"
+        % (total_bytes / 1024 / 1024, count))
     return 0
 
 

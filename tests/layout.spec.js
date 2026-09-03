@@ -74,3 +74,19 @@ test("the spectrum canvas is sized to its box, not left at the default", async (
   expect(attr).not.toEqual([300, 150]);
   expect(attr[0]).toBe(expected);
 });
+
+test("a SoundCloud track drives the spectrum from its own envelope", async ({ page }) => {
+  // The spectrum was YouTube-only until the analysis run covered both sources.
+  const title = await page.evaluate(async () => {
+    const idx = await fetch("../mashMusic-eq/index.json").then((r) => r.json());
+    const have = new Set(idx.ids);
+    const t = window.MASH_TRACKS.find((x) => x.s === "SC" && have.has(x.i));
+    return t ? t.t : null;
+  });
+  test.skip(!title, "no SoundCloud envelopes present");
+
+  await playFirstMatch(page, title.slice(0, 28));
+  await expect(page.locator("#eqTag")).toHaveText(/24 bands/);
+  await expect(page.locator("#eqTag")).toHaveClass(/live/);
+  await waitForCanvasPaint(page, "#eqScope");
+});
