@@ -726,6 +726,7 @@ main {
 
 .brand-info {
   appearance: none;
+  position: relative;   /* anchors the active-filter dot */
   width: 22px;
   height: 22px;
   padding: 0;
@@ -801,7 +802,6 @@ main {
 
 .modal-close {
   appearance: none;
-  margin-left: auto;
   width: 26px; height: 26px;
   padding: 0;
   border: 1px solid var(--line);
@@ -823,12 +823,60 @@ main {
 }
 
 .contrib {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr) 62px 34px;
   align-items: center;
   gap: 10px;
   padding: 5px 16px;
 }
+
+.contrib:hover { background: var(--sunk); }
+/* the row sits flush with .contrib-list's scroll clip, so an outward ring is
+   sliced off at both edges — draw it inside instead */
+.contrib { outline-offset: -2px; }
+
+/* Selection is marked, not dimmed. opacity here dropped the name to 2.8:1 and
+   the focus ring to 1.6:1, which no contrast test that reads CSS variables can
+   see, because it composites at paint time. */
+.contrib[aria-pressed="true"] { box-shadow: inset 3px 0 0 var(--accent); }
+.contrib[aria-pressed="false"] .contrib-name,
+.contrib[aria-pressed="false"] .contrib-n { color: var(--ink-3); }
+.contrib[aria-pressed="false"] .contrib-bar i { background: var(--line-hard); }
+
+.modal-action {
+  appearance: none;
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--line-hard);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.modal-action:hover { color: var(--ink); border-color: var(--ink-3); }
+
+.brand-info-dot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.brand-info-dot[hidden] { display: none; }
 
 .contrib-rank {
   font-family: "IBM Plex Mono", ui-monospace, monospace;

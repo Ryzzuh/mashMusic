@@ -31,6 +31,7 @@
   const K_LIVE = "mash.liveness.v1";
   const K_FAV  = "mash.favs.v1";
   const K_PREF = "mash.prefs.v1";
+  const K_WHO  = "mash.contributors.v1";
 
   /* Liveness: { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch> } }
    * Seeded at runtime from the players' own error events. An offline batch
@@ -39,6 +40,17 @@
    * the offline file only ever adds IDs the app has not tried yet. */
   const liveness = store.read(K_LIVE, {});
   const favs = new Set(store.read(K_FAV, []));
+
+  /* Which contributors are in play. Everyone is selected by default, so the
+   * predicate in buildView() is a no-op until something is deselected. Names
+   * come from the same field the panel ranks, so the two cannot drift. */
+  const contributorOf = (t) => t.v || "Unattributed";
+  const everyoneSelected = () => ALL_WHO.every((n) => who.has(n));
+  const ALL_WHO = [...new Set(TRACKS.map(contributorOf))];
+  const storedWho = store.read(K_WHO, null);
+  const who = new Set(
+    Array.isArray(storedWho) ? storedWho.filter((n) => ALL_WHO.includes(n)) : ALL_WHO
+  );
   const prefs = Object.assign({ skin: "jukebox", listMode: "show" }, store.read(K_PREF, {}));
 
   /* "gone" and "blocked" are verdicts — the platform told us. "stalled" is a
@@ -97,6 +109,7 @@
     const q = state.query.trim().toLowerCase();
     state.view = TRACKS.filter((t) => {
       if (state.favsOnly && !favs.has(t.k)) return false;
+      if (!everyoneSelected() && !who.has(contributorOf(t))) return false;
       if (!q) return true;
       return t.t.toLowerCase().includes(q) || t.v.toLowerCase().includes(q);
     });
@@ -235,6 +248,7 @@
 
   function paintStatus() {
     const deadCount = state.view.reduce((n, t) => n + (isSkippable(t) ? 1 : 0), 0);
+    paintContributorState();
     $("statLoaded").textContent =
       `showing ${state.shown} / ${state.order.length}` +
       (state.order.length !== TRACKS.length ? ` (of ${TRACKS.length})` : "");
@@ -995,26 +1009,65 @@
   function buildContributors() {
     const rows = contributorCounts();
     const top = rows[0]?.[1] || 1;
-    const list = $("contribList");
     const frag = document.createDocumentFragment();
 
     rows.forEach(([name, count], i) => {
       const li = document.createElement("li");
-      li.className = "contrib";
-      li.innerHTML =
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "contrib";
+      btn.dataset.who = name;
+      btn.setAttribute("aria-pressed", String(who.has(name)));
+      btn.innerHTML =
         `<span class="contrib-rank">${String(i + 1).padStart(2, "0")}</span>` +
         `<span class="contrib-name"></span>` +
         `<span class="contrib-bar"><i style="width:${(count / top * 100).toFixed(1)}%"></i></span>` +
         `<span class="contrib-n">${count}</span>`;
-      li.querySelector(".contrib-name").textContent = name;
-      li.title = `${name} — ${count} ${count === 1 ? "track" : "tracks"}`;
+      btn.querySelector(".contrib-name").textContent = name;
+      btn.title = `${name} — ${count} ${count === 1 ? "track" : "tracks"}`;
+      btn.addEventListener("click", () => {
+        if (who.has(name)) who.delete(name); else who.add(name);
+        btn.setAttribute("aria-pressed", String(who.has(name)));
+        store.write(K_WHO, [...who]);
+        render(true);            // repaints the summary via paintStatus
+      });
+      li.appendChild(btn);
       frag.appendChild(li);
     });
 
-    list.replaceChildren(frag);
-    $("contribSub").textContent =
-      `${rows.length} people  ·  ${TRACKS.length.toLocaleString()} tracks`;
+    $("contribList").replaceChildren(frag);
+    paintContributorState();
   }
+
+  /* One place that reflects the selection: the modal subtitle, the all/none
+   * button, and a dot on the toolbar button so an active filter is visible
+   * without opening the panel. */
+  function paintContributorState() {
+    if (!ALL_WHO.length) return;
+    const filtered = !everyoneSelected();
+    $("contribSub").textContent = filtered
+      ? `${who.size} of ${ALL_WHO.length} selected  ·  ${state.view.length.toLocaleString()} tracks`
+      : `${ALL_WHO.length} people  ·  ${TRACKS.length.toLocaleString()} tracks`;
+    // an action, not a toggle: aria-pressed here would announce a state that
+    // contradicts the label, which is the defect already fixed on the mode pill
+    $("contribAll").textContent = filtered ? "All" : "None";
+    $("contribFilterDot").hidden = !filtered;
+    // the dot is the only visual cue, so say it in the accessible name too
+    $("btnContrib").setAttribute(
+      "aria-label",
+      filtered ? `Contributors — filtered to ${who.size} of ${ALL_WHO.length}` : "Contributors"
+    );
+  }
+
+  $("contribAll").addEventListener("click", () => {
+    const filtered = !everyoneSelected();
+    who.clear();
+    if (filtered) ALL_WHO.forEach((n) => who.add(n));   // "All" restores everyone
+    store.write(K_WHO, [...who]);
+    $("contribList").querySelectorAll("[data-who]").forEach((b) =>
+      b.setAttribute("aria-pressed", String(who.has(b.dataset.who))));
+    render(true);
+  });
 
   const contribModal = $("contribModal");
 

@@ -39,6 +39,7 @@
     <button class="brand-info" id="btnContrib" aria-haspopup="dialog" title="Who posted these?">
       <svg aria-hidden="true"><use href="#i-info"></use></svg>
       <span class="sr-only">Contributors</span>
+      <span class="brand-info-dot" id="contribFilterDot" hidden></span>
     </button>
   </div>
 
@@ -149,9 +150,10 @@
   <header class="modal-head">
     <div class="modal-heading">
       <h2 id="contribTitle">Contributors</h2>
-      <p class="modal-sub" id="contribSub"></p>
+      <p class="modal-sub" id="contribSub" aria-live="polite"></p>
     </div>
-    <button class="modal-close" id="contribClose" aria-label="Close">&times;</button>
+    <button class="modal-action" id="contribAll" aria-pressed="true">All</button>
+    <button class="modal-close" id="contribClose" aria-label="Close" autofocus>&times;</button>
   </header>
   <ol class="contrib-list" id="contribList"></ol>
 </dialog>

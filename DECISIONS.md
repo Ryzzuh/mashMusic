@@ -6,6 +6,57 @@ to undo it.
 
 ---
 
+## 2026-09-03 — Milestone 2: an empty contributor selection is honoured
+
+**Unclear:** whether deselecting everyone should persist. Storing it means a
+reload shows an empty library, which looks broken.
+
+**Chosen:** it persists. `[]` is now distinguished from absent state, so
+"None" survives a reload and the indicator dot stays lit.
+
+**Why:** it is an explicit choice, and silently restoring all 71 people
+overrides the user. The lit dot and the "0 tracks" summary make the cause
+visible, and one click on All undoes it.
+
+**Reverse:** restore the `&& storedWho.length` guard in `app.js`.
+
+---
+
+## 2026-09-03 — Milestone 2: reviewer findings addressed
+
+The filter's own logic was sound — ordering in `buildView()` is correct and it
+composes with search and favourites — but four things around it were not.
+
+**The panel summary was wrong or stale in most states.** It quotes
+`state.view.length`, but only repainted when a contributor was toggled. On a
+reload with a stored selection it ran before the first render and read "0
+tracks"; after a search or a favourites toggle it kept a number the view no
+longer had. It now repaints from `paintStatus()`, so it follows the view
+wherever the view moves. Reverting that fix fails five tests.
+
+**Selection was tested by cardinality, not membership.** `who.size !==
+ALL_WHO.length` is only equivalent to "everyone is selected" while the stored
+names are a subset of the current ones. A 72nd contributor in `data/tracks.js`
+would have booted every returning user into a filter they never chose. Now
+`ALL_WHO.every(n => who.has(n))`.
+
+**Dimming deselected rows to `opacity: .38` broke contrast** — the name fell to
+2.8:1 and the focus ring to 1.6:1. No variable-based contrast test can see this,
+because opacity composites at paint time. Selection is now marked with an accent
+bar and deselected names use `--ink-3`, which the contrast gate does check.
+
+**The focus ring was clipped on both sides** by `.contrib-list`'s scroll
+overflow, drawing as two open-ended rules. `outline-offset: -2px` puts it
+inside. That is the third instance of this failure mode in this project.
+
+Also: opening the panel autofocused the All/None button, so one Space wiped the
+whole selection — the close button is now `autofocus`; `aria-pressed` on an
+action button announced a state contradicting its label, so it is gone; and the
+filter is now in `#btnContrib`'s accessible name with `aria-live` on the summary,
+since a dot says nothing to a screen reader.
+
+---
+
 ## 2026-09-03 — Milestone 1: the picker shipped invisible, and the tests approved it
 
 **Unclear:** nothing. Recording because it is the most serious thing that has
