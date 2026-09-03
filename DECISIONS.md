@@ -6,6 +6,59 @@ to undo it.
 
 ---
 
+## 2026-09-03 — Milestone 4: source filter is two toggles, not a switch
+
+**Unclear:** QoL 7 asks for "a switch between YT and SC — works as a filter".
+A literal two-position switch can only ever select one source, so there would
+be no way to see the whole library.
+
+**Chosen:** two independent toggles, both on by default. Turning both off falls
+back to showing everything rather than emptying the list.
+
+**Why:** a filter that cannot express "both" is not a filter. Two toggles cover
+the switch behaviour as a subset.
+
+**Reverse:** make the two buttons mutually exclusive in the `[data-source]`
+handler in `app.js`.
+
+---
+
+## 2026-09-03 — Milestone 4: the flank width is derived, not eyeballed
+
+**Unclear:** "1/8th-ish box ... should align with the midpoint of the track
+number and track name columns" gives two different sizes.
+
+**Chosen:** 130px, which is the measured midpoint of the gap between the
+tracklist's number and name columns (18 padding + 40 heart + 12 gap + 54 index
++ 6). At 1100px that is 11.8% — close enough to an eighth that both readings
+agree. The flank mirrors the row's grid, so the alignment holds structurally
+rather than by tuning.
+
+**Reverse:** the width and grid live together in `.transport` / `.tflank-left`.
+
+---
+
+## 2026-09-03 — Milestone 4: a test that was measuring the harness
+
+The wheel distribution test began timing out after this milestone. Measured
+rather than guessed: ten in-page clicks take 18 ms, ten Playwright clicks take
+1,622 ms — about 162 ms each of actionability checking. Routing 120 spins
+through the harness was ~20 s of overhead, and the extra DOM from the flanks
+pushed it past the 30 s limit.
+
+It now drives the spins in-page, since the test is about the distribution
+`pickWinner` produces and real clicks are covered by the pointer test. That also
+allowed raising the sample from 60 to 400, fixing a flake the reviewer had
+flagged: at n=60 the weighted bound sat about 2.8 sigma from the true rate.
+
+Also fixed here: the source filter restored from localStorage and filtered the
+list, but nothing painted the buttons on boot, so after a reload the controls
+claimed both sources were on while the list was filtered. Same species as the
+milestone 2 summary desync. The buttons are painted from state now, and removing
+that line fails two tests.
+
+---
+
 ## 2026-09-03 — Milestone 3: the wheel, and tests that could not see it
 
 **Unclear:** how "random: pure or by person, weighted or unweighted" should

@@ -33,6 +33,7 @@
   const K_PREF = "mash.prefs.v1";
   const K_WHO  = "mash.contributors.v1";
   const K_WHEEL = "mash.wheel.v1";
+  const K_SRC  = "mash.sources.v1";
 
   /* Liveness: { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch> } }
    * Seeded at runtime from the players' own error events. An offline batch
@@ -46,12 +47,21 @@
    * predicate in buildView() is a no-op until something is deselected. Names
    * come from the same field the panel ranks, so the two cannot drift. */
   const contributorOf = (t) => t.v || "Unattributed";
-  const everyoneSelected = () => ALL_WHO.every((n) => who.has(n));
   const ALL_WHO = [...new Set(TRACKS.map(contributorOf))];
   const storedWho = store.read(K_WHO, null);
   const who = new Set(
     Array.isArray(storedWho) ? storedWho.filter((n) => ALL_WHO.includes(n)) : ALL_WHO
   );
+  const everyoneSelected = () => ALL_WHO.every((n) => who.has(n));
+  /* Source filter. Two independent toggles rather than a two-position switch:
+   * a switch that can only ever select one source could never show the whole
+   * library, which is not what a filter should do. */
+  const ALL_SOURCES = ["YT", "SC"];
+  const storedSrc = store.read(K_SRC, null);
+  const sources = new Set(
+    Array.isArray(storedSrc) ? storedSrc.filter((x) => ALL_SOURCES.includes(x)) : ALL_SOURCES
+  );
+
   const prefs = Object.assign({ skin: "jukebox", listMode: "show" }, store.read(K_PREF, {}));
 
   /* "gone" and "blocked" are verdicts — the platform told us. "stalled" is a
@@ -111,6 +121,7 @@
     state.view = TRACKS.filter((t) => {
       if (state.favsOnly && !favs.has(t.k)) return false;
       if (!everyoneSelected() && !who.has(contributorOf(t))) return false;
+      if (!sources.has(t.s)) return false;
       if (!q) return true;
       return t.t.toLowerCase().includes(q) || t.v.toLowerCase().includes(q);
     });
@@ -250,6 +261,7 @@
   function paintStatus() {
     const deadCount = state.view.reduce((n, t) => n + (isSkippable(t) ? 1 : 0), 0);
     paintContributorState();
+    paintTransportFlanks();
     $("statLoaded").textContent =
       `showing ${state.shown} / ${state.order.length}` +
       (state.order.length !== TRACKS.length ? ` (of ${TRACKS.length})` : "");
@@ -474,6 +486,81 @@
       revealRow(row, track);
     }
   }
+
+  // --------------------------------------------------------- transport flanks
+
+  /* Render enough chunks that `pos` exists in the DOM, then hand back the row. */
+  function revealPosition(pos) {
+    while (state.shown <= pos && state.shown < state.order.length) renderChunk();
+    const track = state.view[state.order[pos]];
+    return track ? rowFor(track.k) : null;
+  }
+
+  function jumpToCurrent() {
+    if (!state.current) return false;
+    const pos = positionOf(state.current);
+    if (pos < 0) return false;                      // filtered out of the view
+    const row = revealPosition(pos);
+    if (!row) return false;
+    row.scrollIntoView({ block: "center", behavior: "smooth" });
+    return true;
+  }
+
+  $("tJump").addEventListener("click", jumpToCurrent);
+  $("tTop").addEventListener("click", () =>
+    $("tracklist").scrollIntoView({ block: "start", behavior: "smooth" }));
+  $("tBottom").addEventListener("click", () => {
+    while (state.shown < state.order.length) renderChunk();   // the list is windowed
+    $("listEnd").scrollIntoView({ block: "end", behavior: "smooth" });
+  });
+
+  // the transport heart mirrors the row hearts for whatever is playing
+  $("tFav").addEventListener("click", () => {
+    if (!state.current) return;
+    const row = rowFor(state.current.k);
+    const btn = row && row.querySelector(".t-fav");
+    if (btn) { btn.click(); return; }               // keeps the row in step
+    if (favs.has(state.current.k)) favs.delete(state.current.k);
+    else favs.add(state.current.k);
+    store.write(K_FAV, [...favs]);
+    paintTransportFlanks();
+  });
+
+  document.querySelectorAll("[data-source]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const src = btn.dataset.source;
+      if (sources.has(src)) sources.delete(src); else sources.add(src);
+      if (!sources.size) ALL_SOURCES.forEach((x) => sources.add(x));   // never empty
+      store.write(K_SRC, [...sources]);
+      render(true);            // repaints the buttons via paintTransportFlanks
+
+    });
+  });
+
+  function paintTransportFlanks() {
+    document.querySelectorAll("[data-source]").forEach((b) =>
+      b.setAttribute("aria-pressed", String(sources.has(b.dataset.source))));
+
+    const fav = state.current && favs.has(state.current.k);
+    $("tFav").setAttribute("aria-pressed", String(!!fav));
+    $("tFav").disabled = !state.current;
+
+    const pos = state.current ? positionOf(state.current) : -1;
+    const after = pos < 0 ? state.order.length : state.order.length - pos - 1;
+    $("mTracksLeft").textContent = String(after);
+
+    const dur = currentDuration();
+    const left = dur ? Math.max(0, dur - mediaTime()) : 0;
+    $("mTrackRemain").textContent = state.current ? fmtDur(Math.round(left)) : "--:--";
+
+    // everything still queued, plus what is left of what is playing
+    let total = left;
+    for (let i = Math.max(0, pos + 1); i < state.order.length; i++) {
+      total += state.view[state.order[i]].d || 0;
+    }
+    $("mAllRemain").textContent = total ? fmtDur(Math.round(total)) : "--:--";
+  }
+  setInterval(paintTransportFlanks, 1000);
 
   // ------------------------------------------------------------- transport
 

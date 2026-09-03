@@ -61,29 +61,37 @@ test.describe("selection distribution", () => {
       window.matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
   });
 
-  const spin = async (page, n) => {
-    const hits = [];
-    for (let i = 0; i < n; i++) {
-      await page.click("#wheelSpin");
-      const line = await page.locator("#wheelSub").textContent();
-      hits.push(line.split("—")[0].trim());
-    }
-    return hits;
-  };
+  /* Driven in-page. A Playwright click costs ~162ms of actionability checking
+   * against ~1.8ms of actual work, so routing hundreds of draws through the
+   * harness measures the harness. Real clicks are covered by the pointer test
+   * below; this one is only about the distribution pickWinner produces. */
+  const spin = (page, n) =>
+    page.evaluate((count) => {
+      const btn = document.getElementById("wheelSpin");
+      const sub = document.getElementById("wheelSub");
+      const hits = [];
+      for (let i = 0; i < count; i++) {
+        btn.click();
+        hits.push(sub.textContent.split("\u2014")[0].trim());
+      }
+      return hits;
+    }, n);
 
   test("weighted odds follow track count, even odds do not", async ({ page }) => {
     // Beau Garcia holds 330 of 1257 tracks (26%) but is 1 of 71 people (1.4%),
     // so the two modes should separate clearly.
     await openWheel(page);
-    const weighted = await spin(page, 60);
+    const weighted = await spin(page, 400);
     const weightedShare = weighted.filter((n) => n === "Beau Garcia").length / weighted.length;
 
     await page.click("#wheelWeight");                     // -> even odds
-    const even = await spin(page, 60);
+    const even = await spin(page, 400);
     const evenShare = even.filter((n) => n === "Beau Garcia").length / even.length;
 
-    expect(weightedShare).toBeGreaterThan(0.10);          // expect ~0.26
-    expect(evenShare).toBeLessThan(0.10);                 // expect ~0.014
+    // n=400 puts both bounds far outside sampling noise; at n=60 the weighted
+    // bound sat about 2.8 sigma from the true rate and flaked occasionally
+    expect(weightedShare).toBeGreaterThan(0.15);          // expect ~0.26
+    expect(evenShare).toBeLessThan(0.06);                 // expect ~0.014
     expect(weightedShare).toBeGreaterThan(evenShare);
     expect(new Set(even).size).toBeGreaterThan(new Set(weighted).size / 2);
   });

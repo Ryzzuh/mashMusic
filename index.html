@@ -27,6 +27,7 @@
     <symbol id="i-random" viewBox="0 0 24 24"><path d="M3 6.5h3.2c1.4 0 2.2.7 3 1.9l4.6 7.2c.8 1.2 1.6 1.9 3 1.9H21M3 17.5h3.2c1.4 0 2.2-.7 3-1.9l1.3-2M13.6 8.4l1.2-1.9c.8-1.2 1.6-1.9 3-1.9H21M18 2.5 21.5 6 18 9.5M18 14.5l3.5 3.5-3.5 3.5"/></symbol>
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.4 4.6 13c-2-2-2-5.2 0-7.2s5.2-2 7.2 0l.2.2.2-.2c2-2 5.2-2 7.2 0s2 5.2 0 7.2z"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 10.6v6.2"/><circle cx="12" cy="7.6" r="1.15"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></symbol>
     <symbol id="i-wheel" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/><path d="M12 3v6.4M12 14.6V21M3 12h6.4M14.6 12H21"/></symbol>
     <symbol id="i-caret" viewBox="0 0 24 24"><path d="M6 9.5 12 15.5 18 9.5"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16.2 16.2 21 21"/></symbol>
@@ -130,6 +131,27 @@
   </section>
 
   <section class="transport" aria-label="Transport">
+    <!-- mirrors the tracklist's first two columns so the heart sits above the
+         row hearts and the jump control above the track numbers -->
+    <div class="tflank tflank-left">
+      <button class="t-fav tflank-fav" id="tFav" aria-pressed="false"
+              title="Favourite the playing track">
+        <svg><use href="#i-heart"></use></svg>
+      </button>
+
+      <div class="tjump-wrap">
+        <button class="tjump" id="tJump" title="Jump to the playing track"
+                aria-label="Jump to the playing track">
+          <svg><use href="#i-target"></use></svg>
+        </button>
+        <span class="tjump-tab">
+          <button id="tTop" aria-label="Jump to the top of the list" title="Top"></button>
+          <button id="tBottom" aria-label="Jump to the bottom of the list" title="Bottom"></button>
+        </span>
+      </div>
+    </div>
+
+    <div class="tcontrols">
     <button class="tbtn t-prev"   id="bPrev"   title="Previous"><svg><use href="#i-prev"></use></svg></button>
     <button class="tbtn t-play"   id="bPlay"   title="Play"><svg><use href="#i-play"></use></svg></button>
     <button class="tbtn t-pause"  id="bPause"  title="Pause"><svg><use href="#i-pause"></use></svg></button>
@@ -138,6 +160,19 @@
     <button class="tbtn t-random" id="bRandom" title="Shuffle" aria-pressed="false"><svg><use href="#i-random"></use></svg></button>
     <button class="tbtn t-heart"  id="bFavs"   title="Favourites only" aria-pressed="false"><svg><use href="#i-heart"></use></svg></button>
     <button class="tbtn t-wheel"  id="bWheel"  title="Spin for a contributor" aria-haspopup="dialog"><svg><use href="#i-wheel"></use></svg></button>
+    </div>
+
+    <div class="tflank tflank-right">
+      <div class="tsource" role="group" aria-label="Filter by source">
+        <button id="fltYT" data-source="YT" aria-pressed="true">YT</button>
+        <button id="fltSC" data-source="SC" aria-pressed="true">SC</button>
+      </div>
+      <dl class="tmetrics">
+        <div><dt>left</dt><dd id="mAllRemain">--:--</dd></div>
+        <div><dt>track</dt><dd id="mTrackRemain">--:--</dd></div>
+        <div><dt>tracks</dt><dd id="mTracksLeft">0</dd></div>
+      </dl>
+    </div>
   </section>
 
   <section class="listing" aria-label="Tracks">

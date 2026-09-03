@@ -507,14 +507,127 @@ main {
 /* ---------- transport ---------- */
 
 .transport {
+  /* 130px is the midpoint of the gap between the tracklist's number and name
+     columns (18 pad + 40 fav + 12 gap + 54 index + 6), so the flank ends
+     exactly there rather than at an eyeballed 1/8. */
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) 137px;
+  align-items: stretch;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.tcontrols {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
   gap: 10px;
   padding: 14px 18px;
+}
+
+/* The flanks carry the tracklist's surface, not the transport's, so they read
+   as an extension of the list they align to. */
+.tflank {
+  background: var(--ground);
+  display: grid;
+  align-items: center;
+}
+.tflank-left {
+  grid-template-columns: 40px 54px;
+  gap: 12px;
+  padding-left: 18px;
+  border-right: 1px solid var(--line);
+}
+.tflank-right {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 18px 0 12px;
+  border-left: 1px solid var(--line);
+}
+
+.tflank-fav { justify-self: start; }
+
+/* the jump control, sitting over the track-number column */
+.tjump-wrap { display: flex; align-items: stretch; height: 30px; gap: 2px; }
+
+.tjump {
+  appearance: none;
+  flex: 1;
+  border: 1px solid var(--line-hard);
+  border-radius: 4px;
   background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.tjump svg {
+  width: 15px; height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+.tjump:hover { color: var(--accent); border-color: var(--accent); }
+
+/* two stacked cells: top jumps to the start of the list, bottom to the end */
+.tjump-tab {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  width: 12px;
+  gap: 2px;
+}
+.tjump-tab button {
+  appearance: none;
+  border: 1px solid var(--line-hard);
+  border-radius: 2px;
+  background: var(--panel);
+  cursor: pointer;
+  padding: 0;
+}
+.tjump-tab button:hover { background: var(--accent); border-color: var(--accent); }
+
+/* source filter */
+.tsource { display: grid; grid-template-rows: 1fr 1fr; gap: 3px; }
+.tsource button {
+  appearance: none;
+  padding: 2px 7px;
+  border: 1px solid var(--line-hard);
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: .1em;
+}
+.tsource button[aria-pressed="true"] {
+  background: var(--check);
+  border-color: var(--check);
+  color: var(--check-ink);
+}
+
+/* three stacked readouts */
+.tmetrics {
+  margin: 0;
+  display: grid;
+  gap: 1px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.tmetrics > div { display: flex; justify-content: space-between; gap: 6px; }
+.tmetrics dt {
+  font-size: 8.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.tmetrics dd { margin: 0; font-size: 10.5px; color: var(--ink-2); }
+
+@media (max-width: 760px) {
+  .transport { grid-template-columns: 1fr; }
+  .tflank { display: none; }      /* the controls matter more than the readouts */
 }
 
 .tbtn {
