@@ -6,6 +6,80 @@ to undo it.
 
 ---
 
+## 2026-09-03 — Milestone 3: the wheel, and tests that could not see it
+
+**Unclear:** how "random: pure or by person, weighted or unweighted" should
+surface, given the spec also asks for a spinning wheel of contributor initials.
+
+**Chosen:** shuffle stays a pure uniform permutation; the wheel *is* the
+by-person picker, with weighted/even-odds on it. Weighted makes a contributor's
+segment and odds proportional to their track count; even odds gives all an
+equal slice. Landing plays a random non-dead track of theirs.
+
+**Why:** one control per idea, and the wheel is the natural home for the
+weighting choice since it visibly changes the segment sizes.
+
+**Reverse:** the wheel is self-contained in `app.js`; remove `#bWheel`, the
+dialog, and the wheel block.
+
+---
+
+## 2026-09-03 — Milestone 3: my tests passed against a wheel that landed at random
+
+**Unclear:** nothing. Recording because it is the same failure as milestone 1,
+found a different way.
+
+**What happened:** the reviewer replaced the resting-angle computation with
+`Math.random()`, so the wheel stopped on a segment unrelated to the winner, and
+**all five tests still passed**. Every assertion read `#wheelSub` or `#npSub`,
+both written straight from `pickWinner()`'s return value. Nothing sampled a
+canvas pixel, so the rotation, the pointer and `drawWheel` were untested. One
+test was even named "the contributor it landed on".
+
+**Chosen:** a test that filters to two contributors, spins eight times, and each
+time samples the canvas pixel under the pointer and compares it to the announced
+winner. Verified against the reviewer's exact mutation — it now fails on spin 1.
+
+**Also worth recording:** when I mutation-tested the mid-spin recovery, two of my
+assumptions about it were wrong. Removing the close guard passed; removing the
+canvas size guard passed. Only removing `endSpin()` from the reopen path failed
+it. The guards are defence in depth; the reopen reset is what the test holds up.
+A test guards one line, and it is not always the line you wrote it for.
+
+---
+
+## 2026-09-03 — Milestone 3: reviewer findings addressed
+
+**A crash that would have shipped.** Closing the dialog mid-spin left the canvas
+at zero size, `arc()` threw on a negative radius, and the throw killed the rAF
+callback *before* the lines that re-enable Spin — dead until reload. Now guarded
+three ways: a size check in `drawWheel`, a `close` listener, and a reset on open.
+
+**The Spin button was clipped away entirely below about 543px of viewport
+height** — `.modal` has `overflow: hidden` and the wheel dialog had no scrollable
+region, so there was no way to reach it. The stage now scrolls. That is the
+fourth instance of this failure class here, and the first that no test could see
+because nothing in the suite changed viewport size. One does now.
+
+**The wheel borrowed the transport colour tokens**, which Night Dial
+deliberately flattens to a single amber — three of six slice colours were
+identical. It now has its own `--wheel-1..6` per theme.
+
+**No segment was labelled in even-odds mode.** All 71 slices are 0.089 rad,
+below the 0.14 threshold for tangential text. Labels are now radial, so they
+need the arc width to clear their height rather than their length, and every
+segment gets initials.
+
+Also: the wheel now derives from `state.view` rather than the whole library, so
+it composes with search and favourites and cannot start a track the list is
+hiding; `store.read(K_WHEEL, ...).weighted` could throw at module scope on a
+stored `"null"` and take the whole app down; colours are cached like `EQC` and
+`SCOL` instead of two `getComputedStyle` calls per segment per frame; the canvas
+has a text alternative; and the weighting button is labelled with its action to
+match `#contribAll`.
+
+---
+
 ## 2026-09-03 — Milestone 2: an empty contributor selection is honoured
 
 **Unclear:** whether deselecting everyone should persist. Storing it means a

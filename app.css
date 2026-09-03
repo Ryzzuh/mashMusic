@@ -55,6 +55,9 @@ html[data-skin="jukebox"] {
   --eq-mid:      #eba233;
   --eq-hi:       #fa1768;
 
+  --wheel-1: #fa1768;  --wheel-2: #eba233;  --wheel-3: #1cd320;
+  --wheel-4: #1aeac6;  --wheel-5: #a05ffb;  --wheel-6: #c4d63d;
+
   --shadow:      0 1px 0 var(--line), 0 14px 34px -20px #000;
   --stage-bg:    radial-gradient(120% 90% at 50% 0%, #2e170e 0%, #120a07 72%);
   --blur-amount: 5px;
@@ -96,6 +99,11 @@ html[data-skin="night"] {
   --eq-lo:       #4e8fa8;
   --eq-mid:      #e8a33d;
   --eq-hi:       #ffbe5c;
+
+  /* Night Dial deliberately flattens the transport to one amber, so the wheel
+     needs its own hues or adjacent segments become indistinguishable. */
+  --wheel-1: #e8a33d;  --wheel-2: #4e8fa8;  --wheel-3: #7fa87f;
+  --wheel-4: #b98274;  --wheel-5: #9a8fb8;  --wheel-6: #c9b45e;
   --shadow:      0 1px 0 var(--line), 0 14px 32px -20px #000;
   --stage-bg:    radial-gradient(120% 90% at 50% 0%, #16222f 0%, #0d1420 70%);
   --blur-amount: 5px;
@@ -1005,3 +1013,66 @@ main {
 }
 
 @media (max-width: 620px) { #scrubber { height: 26px; } }
+
+/* ---------- contributor wheel ---------- */
+
+.t-wheel { --btn: var(--tint); }
+.t-wheel svg {
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.wheel-modal {
+  width: min(420px, calc(100vw - 36px));
+  max-height: min(88vh, 660px);
+  margin: 5vh auto 0;          /* launched from the transport, so not anchored
+                                  under the brand like the contributors panel */
+}
+
+.wheel-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--sunk);
+  min-height: 0;               /* shrink before the footer does */
+  overflow-y: auto;
+}
+#wheelCanvas { display: block; width: 100%; max-width: 340px; aspect-ratio: 1; }
+.wheel-foot { flex: none; }
+
+/* the marker the wheel lands against, at twelve o'clock */
+.wheel-pointer {
+  position: absolute;
+  top: 6px;
+  width: 0;
+  height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 14px solid var(--ink);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5));
+}
+
+.wheel-foot {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.wheel-spin {
+  appearance: none;
+  padding: 10px 30px;
+  border: 1px solid var(--accent);
+  border-radius: 100px;
+  background: var(--accent);
+  color: var(--check-ink);
+  cursor: pointer;
+  font-family: Archivo, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: .02em;
+}
+.wheel-spin:hover { background: var(--accent-lift); border-color: var(--accent-lift); }
+.wheel-spin[disabled] { opacity: .5; cursor: not-allowed; }

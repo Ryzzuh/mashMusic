@@ -32,6 +32,7 @@
   const K_FAV  = "mash.favs.v1";
   const K_PREF = "mash.prefs.v1";
   const K_WHO  = "mash.contributors.v1";
+  const K_WHEEL = "mash.wheel.v1";
 
   /* Liveness: { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch> } }
    * Seeded at runtime from the players' own error events. An offline batch
@@ -625,7 +626,10 @@
     };
   }
   readEqColors();
-  new MutationObserver(() => { readEqColors(); readScrubColors(); })
+  new MutationObserver(() => {
+    readEqColors(); readScrubColors(); readWheelColors();
+    if (wheelModal.open) drawWheel();
+  })
     .observe(document.documentElement, { attributes: true, attributeFilter: ["data-skin"] });
 
   function eqRamp(v) {
@@ -994,6 +998,240 @@
 
     drawScrubber();
   }
+
+  // -------------------------------------------------------------- wheel
+  //
+  // The by-person half of the random spec. Shuffle stays a pure uniform
+  // permutation; this picks a contributor, then one of their tracks.
+  // Weighted makes a contributor's odds proportional to how much they posted;
+  // even odds gives all of them the same slice.
+
+  const wheelCanvas = $("wheelCanvas");
+  const wheelCtx = wheelCanvas.getContext("2d");
+  const wheelModal = $("wheelModal");
+  const storedWheel = store.read(K_WHEEL, null);
+  let wheelWeighted = !storedWheel || storedWheel.weighted !== false;
+  let wheelAngle = 0;            // radians; 0 puts segment 0 at twelve o'clock
+  let wheelSpinning = false;
+  let wheelRaf = 0;
+  let wheelWinner = null;
+  let wheelW = 0;
+
+  const initialsOf = (name) => {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return (parts[0] || "?").slice(0, 2).toUpperCase();
+  };
+
+  /* Cached like EQC and SCOL: drawWheel runs ~190 times a spin and was calling
+   * getComputedStyle twice per segment per frame. */
+  let WCOL = {};
+  function readWheelColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const tok = (n, fb) => cs.getPropertyValue(n).trim() || fb;
+    WCOL = {
+      slices: [1, 2, 3, 4, 5, 6].map((i) => tok("--wheel-" + i, "#888")),
+      seam: tok("--sunk", "#111"),
+      hub: tok("--panel", "#222"),
+      rim: tok("--line-hard", "#444"),
+      label: tok("--check-ink", "#000"),
+      mark: tok("--ink", "#fff"),
+    };
+  }
+  readWheelColors();
+
+  /* Derived from the current view, not the raw library, so the wheel composes
+   * with search and favourites as well as the contributor filter. */
+  function wheelSegments() {
+    const tally = new Map();
+    for (const t of state.view) {
+      const n = contributorOf(t);
+      tally.set(n, (tally.get(n) || 0) + 1);
+    }
+    const rows = [...tally].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const total = rows.reduce((sum, [, c]) => sum + c, 0) || 1;
+    let at = 0;
+    return rows.map(([name, count]) => {
+      const share = wheelWeighted ? count / total : 1 / rows.length;
+      const seg = { name, count, start: at, end: at + share * Math.PI * 2 };
+      at = seg.end;
+      return seg;
+    });
+  }
+
+  function sizeWheel() {
+    const box = wheelCanvas.getBoundingClientRect();
+    wheelW = Math.round(box.width);
+    if (wheelW < 40) return false;               // closed, or not laid out yet
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const px = Math.round(wheelW * dpr);
+    if (wheelCanvas.width !== px) {
+      wheelCanvas.width = px;
+      wheelCanvas.height = px;
+    }
+    wheelCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return true;
+  }
+  new ResizeObserver(() => { if (wheelModal.open && sizeWheel()) drawWheel(); })
+    .observe(wheelCanvas);
+
+  function drawWheel(segments) {
+    // A negative radius throws IndexSizeError, which killed the spin loop
+    // before its cleanup ran and left the Spin button dead until reload.
+    if (!sizeWheel()) return;
+    const segs = segments || wheelSegments();
+    const size = wheelW, r = size / 2, cx = r, cy = r;
+    wheelCtx.clearRect(0, 0, size, size);
+    if (!segs.length) return;
+
+    segs.forEach((seg, i) => {
+      // -PI/2 puts angle 0 at twelve o'clock, where the pointer sits
+      const a0 = seg.start + wheelAngle - Math.PI / 2;
+      const a1 = seg.end + wheelAngle - Math.PI / 2;
+      const won = wheelWinner === seg.name;
+
+      wheelCtx.beginPath();
+      wheelCtx.moveTo(cx, cy);
+      wheelCtx.arc(cx, cy, r - 4, a0, a1);
+      wheelCtx.closePath();
+      wheelCtx.fillStyle = WCOL.slices[i % WCOL.slices.length];
+      wheelCtx.fill();
+      wheelCtx.strokeStyle = won ? WCOL.mark : WCOL.seam;
+      wheelCtx.lineWidth = won ? 3 : 1;
+      wheelCtx.stroke();
+
+      // Radial labels: text runs outward, so it needs the segment's arc width
+      // to clear its height rather than its length. Tangential labels vanished
+      // entirely in even-odds mode, where all 71 segments are 0.089 rad.
+      if (a1 - a0 >= 0.05) {
+        const mid = (a0 + a1) / 2;
+        wheelCtx.save();
+        wheelCtx.translate(cx, cy);
+        wheelCtx.rotate(mid);
+        wheelCtx.translate(r * 0.62, 0);
+        if (Math.cos(mid) < 0) wheelCtx.rotate(Math.PI);
+        wheelCtx.fillStyle = WCOL.label;
+        wheelCtx.font = "600 9px Archivo, sans-serif";
+        wheelCtx.textAlign = "center";
+        wheelCtx.textBaseline = "middle";
+        wheelCtx.fillText(initialsOf(seg.name), 0, 0);
+        wheelCtx.restore();
+      }
+    });
+
+    wheelCtx.beginPath();
+    wheelCtx.arc(cx, cy, r * 0.16, 0, Math.PI * 2);
+    wheelCtx.fillStyle = WCOL.hub;
+    wheelCtx.fill();
+    wheelCtx.strokeStyle = WCOL.rim;
+    wheelCtx.lineWidth = 1;
+    wheelCtx.stroke();
+  }
+
+  function pickWinner(segments) {
+    if (!segments.length) return null;
+    if (!wheelWeighted) return segments[Math.floor(Math.random() * segments.length)];
+    const total = segments.reduce((sum, s) => sum + s.count, 0);
+    let roll = Math.random() * total;
+    for (const seg of segments) {
+      roll -= seg.count;
+      if (roll <= 0) return seg;
+    }
+    return segments[segments.length - 1];
+  }
+
+  function playFromContributor(name) {
+    // from the view, so a spin cannot start a track the list is filtering out
+    const pool = state.view.filter((t) => contributorOf(t) === name && !isSkippable(t));
+    if (!pool.length) {
+      $("wheelSub").textContent = `${name} — nothing playable`;
+      return;
+    }
+    const track = pool[Math.floor(Math.random() * pool.length)];
+    $("wheelSub").textContent = `${name} — ${track.t}`;
+    wheelCanvas.setAttribute("aria-label", `Wheel landed on ${name}`);
+    play(track);
+  }
+
+  function endSpin() {
+    if (wheelRaf) cancelAnimationFrame(wheelRaf);
+    wheelRaf = 0;
+    wheelSpinning = false;
+    $("wheelSpin").disabled = !wheelSegments().length;
+  }
+
+  function spinWheel() {
+    if (wheelSpinning) return;
+    const segments = wheelSegments();
+    const winner = pickWinner(segments);
+    if (!winner) { paintWheel(); return; }
+
+    wheelWinner = null;
+    const mid = (winner.start + winner.end) / 2;
+    const target = -mid + Math.PI * 2 * 4;          // four turns for the look
+    const land = () => {
+      wheelAngle = ((target % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      wheelWinner = winner.name;
+      drawWheel(segments);
+      endSpin();
+      playFromContributor(winner.name);
+    };
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { land(); return; }
+
+    wheelSpinning = true;
+    $("wheelSpin").disabled = true;
+    const from = wheelAngle, dur = 3200, t0 = performance.now();
+    const ease = (p) => 1 - Math.pow(1 - p, 3);
+
+    const step = (now) => {
+      if (!wheelModal.open) { endSpin(); return; }   // dismissed mid-spin
+      const p = Math.min(1, (now - t0) / dur);
+      wheelAngle = from + (target - from) * ease(p);
+      drawWheel(segments);
+      if (p < 1) { wheelRaf = requestAnimationFrame(step); return; }
+      land();
+    };
+    wheelRaf = requestAnimationFrame(step);
+  }
+
+  /* One painter for the panel chrome, so the open and toggle paths cannot
+   * disagree about the empty case. */
+  function paintWheel() {
+    const segments = wheelSegments();
+    $("wheelWeight").textContent = wheelWeighted ? "Even odds" : "Weighted";
+    $("wheelSub").textContent = segments.length
+      ? `${segments.length} in play · ${wheelWeighted ? "odds follow track count" : "equal odds"}`
+      : "No contributors selected";
+    $("wheelSpin").disabled = !segments.length;
+    wheelCanvas.setAttribute(
+      "aria-label",
+      segments.length
+        ? `Wheel of ${segments.length} contributors, ${wheelWeighted ? "weighted by track count" : "equal odds"}`
+        : "Wheel with no contributors selected"
+    );
+    drawWheel(segments);
+    return segments;
+  }
+
+  $("bWheel").addEventListener("click", () => {
+    wheelWinner = null;
+    endSpin();
+    wheelModal.showModal();
+    paintWheel();                 // after showModal, so the canvas has a size
+  });
+  $("wheelClose").addEventListener("click", () => wheelModal.close());
+  wheelModal.addEventListener("close", endSpin);
+  $("wheelSpin").addEventListener("click", spinWheel);
+  $("wheelWeight").addEventListener("click", () => {
+    wheelWeighted = !wheelWeighted;
+    store.write(K_WHEEL, { weighted: wheelWeighted });
+    wheelWinner = null;
+    paintWheel();
+  });
+  wheelModal.addEventListener("click", (e) => {
+    if (e.target === wheelModal) wheelModal.close();
+  });
 
   // ------------------------------------------------------- contributors
 
