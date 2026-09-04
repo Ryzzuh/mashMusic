@@ -76,13 +76,26 @@ test("jump to current brings the playing row into view", async ({ page }) => {
 
 test("the tab jumps to the top and to the bottom of the list", async ({ page }) => {
   await page.click("#tBottom");
-  await page.waitForTimeout(900);
   // the bottom of a windowed list means rendering the rest of it first
-  expect(await page.locator(".trow").count()).toBe(1257);
+  await expect.poll(() => page.locator(".trow").count()).toBe(1257);
   await expect(page.locator("#listEnd")).toBeVisible();
 
+  /* No fixed sleep before a geometry read. Since QoL 10 the stage animates
+   * its own height, so the layout is still moving after the smooth scroll
+   * nominally ends — 900ms left this 525px short of its resting place. */
   await page.click("#tTop");
-  await page.waitForTimeout(900);
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY)),
+    { timeout: 15_000 }).toBe(0);
+  await expect.poll(async () => {
+    const g = await page.evaluate(() => {
+      const pinned = document.querySelector(".pinned");
+      const sticky = getComputedStyle(pinned).position === "sticky";
+      const chrome = (sticky ? pinned : document.querySelector(".topbar")).getBoundingClientRect();
+      const list = document.querySelector("#tracklist").getBoundingClientRect();
+      return Math.abs(list.top - chrome.bottom);
+    });
+    return g < 6;
+  }, { timeout: 10_000, message: "the list never settled below the sticky chrome" }).toBe(true);
   /* Landing the list at y=0 buries its first rows behind the sticky chrome.
    * Asserting |listTop| < 30 was satisfied by exactly that bug. The chrome is
    * the top bar plus, since QoL 10, the pinned stage and scrubber — so the

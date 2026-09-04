@@ -6,6 +6,113 @@ to undo it.
 
 ---
 
+## 2026-09-05 — The collapsing stage turned every fixed sleep into a race
+
+**What happened:** after milestone 8 the suite started failing intermittently,
+a different test each run, all of them passing in isolation. I chased them one
+at a time — halo colour, halo hover, autoplay scroll, jump-to-top, jump-to-top
+again — before recognising one cause behind all of them.
+
+Milestone 6 made the stage animate its own height, and milestone 7 put the
+transport buttons on a transition. Any assertion that read geometry or a
+computed style after a fixed `waitForTimeout` became a race against a layout
+that was still moving. `900ms` after a jump-to-top left the list 525px short of
+its resting place.
+
+**Chosen:** no fixed sleep before a geometry or computed-style assertion. Poll
+for the settled value, or for the claim itself. The suite is green at 107.
+
+**One test was wrong in a more interesting way.** "Starting the next track does
+not move the view" scrolled to 400, read the position, clicked Next, and found
+142. Nothing to do with autoplay: its own `scrollTo` collapsed the stage, which
+shortened the document by ~258px over 300ms and clamped the position. The test
+was blaming the next track for a move it had caused itself. It now lets the
+layout settle before it takes its baseline.
+
+---
+
+## 2026-09-05 — Measurements taken on a machine at load average 209
+
+**Worth recording because I nearly shipped a fix for it.**
+
+Jump-to-top appeared to come to rest 72px short of the document top, which I
+diagnosed as the document reflowing under a smooth scroll, and for which I
+wrote a self-correcting handler that re-checked the position and snapped it.
+
+Then I looked at the machine: load average **153 / 209 / 169**, from my own
+back-to-back suite runs. The behaviour would not reproduce on a quiet machine,
+nor under CPU throttling down to 1/8 speed. The correction was defensive
+complexity built on an artefact of my own making, and it broke two other tests
+by fighting their programmatic scrolls — so it is reverted and `#tTop` is three
+lines again.
+
+**The rule for next time:** check `uptime` before concluding anything from a
+timing measurement, and do not run suites concurrently to save wall-clock time.
+It cost far more than it saved.
+
+---
+
+## 2026-09-04 — Milestone 8: one seam in the app exists for the tests
+
+**Unclear:** whether to add a hook to make completion testable, or to leave
+the whole of Jukebox 3 unverified.
+
+**The problem:** a track decays when it is *played to the end*. Both end
+events — YouTube's `ENDED` and SoundCloud's `FINISH` — fire inside a
+cross-origin iframe, and the suite blocks both hosts so runs stay hermetic.
+There is no user-facing way to reach the end of a track offline: the scrubber's
+position comes from the same blocked player.
+
+**Chosen:** `document.addEventListener("mash:completed", completed)`. Tests
+dispatch that event. I picked a DOM event over exposing internals on `window`
+because it is a fair extension point in its own right — anything may declare a
+track finished — and it carries no privilege the UI does not already have.
+
+**Why I did it at all:** the alternative was shipping the feature with its
+central rule untested. That rule is *skip is not a listen*, and there is now a
+mutation check that rewires the Next button to completion and requires the
+suite to go red. It does.
+
+**Reverse:** delete the one `addEventListener` line in `app.js`. The feature
+keeps working; only `tests/decay.spec.js` stops.
+
+---
+
+## 2026-09-04 — Decay hides rather than dims, and always
+
+**Unclear:** "tracks pop once played to completion" does not say whether a
+played track is hidden or merely marked, nor whether the behaviour can be
+turned off.
+
+**Chosen:** the predicate goes in `buildView()` alongside search, favourites,
+contributors and sources, so played tracks leave every surface at once — rows,
+counts, autoplay, the wheel. Always on, with the reset control as the only
+escape hatch, which is what the spec names. The row animates out first.
+
+**Why:** "decaying" and "pop" both describe removal, not styling, and a
+half-measure — dimming a row that autoplay still selects — would be worse than
+either option. Putting it in the one predicate chain is why it took a single
+line to reach six features.
+
+**Two calls you may want to change:** there is no way to *view* played tracks
+without resetting all of them, and no per-track undo. Both are small additions
+if you want them; neither is in the spec.
+
+**Reverse:** the `played` predicate in `buildView()` is one line.
+
+---
+
+## 2026-09-04 — Two tests assumed track titles are unique
+
+They are not. The library holds genuine duplicates — the same title under
+several ids — which the plan already noted as the thing that makes milestone
+9's library-first replacement search work at all. I searched a title expecting
+to isolate one track and got three. The tests now pick a track whose title
+occurs exactly once. Worth remembering before writing anything else that
+treats a title as a key.
+
+---
+
 ## 2026-09-04 — Jump-to-top scrolls to the document top, not a computed offset
 
 **Unclear:** where "the top of the list" is, once the chrome above it changes

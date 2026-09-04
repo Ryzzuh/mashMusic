@@ -41,6 +41,13 @@ const BUTTONS = ["#bPrev", "#bPlay", "#bPause", "#bNext", "#bStop", "#bRandom", 
 for (const skin of ["jukebox", "night"]) {
   test(`each button glows in its own tube colour (${skin})`, async ({ page }) => {
     await page.click(`button[data-skin="${skin}"]`);
+    /* box-shadow is on a .18s transition, so switching themes and reading at
+     * once can catch the halo interpolating between the two palettes. Wait
+     * for the first button to settle before measuring any of them. */
+    await expect.poll(async () => {
+      const { halo, btn } = await haloVsBtn(page, BUTTONS[0]);
+      return halo && btn && halo.every((v, i) => Math.abs(v - btn[i]) <= 2);
+    }, { message: `${skin}: halo never settled to --btn` }).toBe(true);
 
     for (const sel of BUTTONS) {
       const { halo, btn } = await haloVsBtn(page, sel);
@@ -71,14 +78,15 @@ test("the halo brightens on hover and when latched on", async ({ page }) => {
   const rest = await outerBlur(page, "#bFavs");
   expect(rest).toBeGreaterThan(0);
 
+  // the glow transitions over .18s, so it has not grown yet the instant the
+  // pointer arrives — poll rather than read once
   await page.hover("#bFavs");
-  const hover = await outerBlur(page, "#bFavs");
-  expect(hover).toBeGreaterThan(rest);
+  await expect.poll(() => outerBlur(page, "#bFavs")).toBeGreaterThan(rest);
 
   await page.click("#bFavs");
   await expect(page.locator("#bFavs")).toHaveAttribute("aria-pressed", "true");
   await page.hover("#bWheel");                       // move the pointer away
-  expect(await outerBlur(page, "#bFavs")).toBeGreaterThan(rest);
+  await expect.poll(() => outerBlur(page, "#bFavs")).toBeGreaterThan(rest);
 });
 
 test("a disabled button does not glow", async ({ page }) => {

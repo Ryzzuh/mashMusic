@@ -1379,3 +1379,34 @@ main {
 /* No reduced-motion block here: the global rule near .statusbar already caps
    every transition-duration at .01ms !important, and that wins over a local
    `transition: none` anyway. */
+
+
+/* ------------------------------------------- decaying tracklist (Jukebox 3)
+ *
+ * A row that has been played to the end pops before it leaves. The animation
+ * is what the removal waits on, so it must always finish: the global
+ * reduced-motion rule caps it to .01ms, which fires animationend immediately
+ * rather than stranding playback. */
+@keyframes rowPop {
+  0%   { transform: scale(1);    opacity: 1; }
+  35%  { transform: scale(1.02); opacity: 1; background: var(--sunk); }
+  100% { transform: scale(.96);  opacity: 0; }
+}
+.trow.is-popping {
+  animation: rowPop .32s var(--ease) forwards;
+  pointer-events: none;
+}
+
+.stat-reset {
+  appearance: none;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+.stat-reset:hover { color: var(--ink); border-color: var(--accent); }
+.stat-reset[hidden] { display: none; }

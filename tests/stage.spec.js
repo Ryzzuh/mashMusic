@@ -144,6 +144,7 @@ test("a list with too little scroll room never collapses", async ({ page }) => {
 });
 
 test("jump-to-top clears the pinned stage, not just the top bar", async ({ page }) => {
+  test.setTimeout(60_000);
   await page.evaluate(() => window.scrollTo(0, 6000));
   await settle(page);
   await page.click("#tTop");
@@ -153,14 +154,23 @@ test("jump-to-top clears the pinned stage, not just the top bar", async ({ page 
    * y=18, and waiting only for the scroll position to stop still caught the
    * 300ms expand that fires once it reaches 0. The claim is about where the
    * list comes to rest, so wait for exactly that. */
+  /* Two separate waits, so a failure says which half broke. Under a loaded
+   * full-suite run this timed out at 8s while passing alone, and "the row
+   * never cleared" did not distinguish a stalled smooth scroll from a wrong
+   * resting geometry. */
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY)),
+    { timeout: 20_000, message: "the smooth scroll never reached the document top" })
+    .toBe(0);
+
   await expect.poll(async () => {
     const g = await page.evaluate(() => {
       const first = document.querySelector(".trow").getBoundingClientRect();
       const pinned = document.querySelector(".pinned").getBoundingClientRect();
-      return { firstRowTop: first.top, pinnedBottom: pinned.bottom };
+      return { firstRowTop: Math.round(first.top), pinnedBottom: Math.round(pinned.bottom) };
     });
     return g.firstRowTop >= g.pinnedBottom - 2;
-  }, { timeout: 8000, message: "the first row never cleared the pinned block" }).toBe(true);
+  }, { timeout: 10_000, message: "the stage expanded but the first row stayed behind it" })
+    .toBe(true);
 });
 
 test("the stage does not pin on a narrow viewport", async ({ page }) => {

@@ -89,6 +89,15 @@ test("the badge sits on the divider between the two theme buttons", async ({ pag
 
 test("starting the next track does not move the view", async ({ page }) => {
   await page.evaluate(() => window.scrollTo(0, 400));
+  /* Let the layout settle first. This scroll collapses the stage (QoL 10),
+   * which shortens the document by ~258px over 300ms and can clamp the
+   * position — measuring straight away recorded 400, then read 142 after the
+   * click and blamed the next track for a move the test itself caused. */
+  await expect.poll(async () => {
+    const a = await page.evaluate(() => Math.round(window.scrollY));
+    await page.waitForTimeout(150);
+    return a === (await page.evaluate(() => Math.round(window.scrollY)));
+  }).toBe(true);
   const before = await page.evaluate(() => window.scrollY);
   await page.click("#bNext");
   await page.waitForTimeout(500);

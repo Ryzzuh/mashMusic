@@ -34,6 +34,7 @@
   const K_WHO  = "mash.contributors.v1";
   const K_WHEEL = "mash.wheel.v1";
   const K_SRC  = "mash.sources.v1";
+  const K_PLAYED = "mash.played.v1";
 
   /* Liveness: { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch> } }
    * Seeded at runtime from the players' own error events. An offline batch
@@ -42,6 +43,12 @@
    * the offline file only ever adds IDs the app has not tried yet. */
   const liveness = store.read(K_LIVE, {});
   const favs = new Set(store.read(K_FAV, []));
+
+  /* Jukebox 3: tracks leave the list once they have been played to the end.
+   * Persisted, because a work-through-the-library feature that forgets on
+   * reload is pointless. Only the players' own end events write to this — a
+   * skip is not a listen. */
+  const played = new Set(store.read(K_PLAYED, []));
 
   /* Which contributors are in play. Everyone is selected by default, so the
    * predicate in buildView() is a no-op until something is deselected. Names
@@ -120,6 +127,7 @@
   function buildView() {
     const q = state.query.trim().toLowerCase();
     state.view = TRACKS.filter((t) => {
+      if (played.has(t.k)) return false;
       if (state.favsOnly && !favs.has(t.k)) return false;
       if (!everyoneSelected() && !who.has(contributorOf(t))) return false;
       if (!sources.has(t.s)) return false;
@@ -273,6 +281,9 @@
       `showing ${state.shown} / ${state.order.length}` +
       (state.order.length !== TRACKS.length ? ` (of ${TRACKS.length})` : "");
     $("statDead").textContent = deadCount ? `${deadCount} unavailable` : "";
+    const pl = $("statPlayed");
+    pl.hidden = !played.size;
+    pl.textContent = `${played.size} played \u00b7 reset`;
     $("brandCount").textContent = `${TRACKS.length} tracks`;
   }
 
@@ -299,7 +310,7 @@
       events: {
         onReady: () => { ytReady = true; },
         onStateChange: (e) => {
-          if (e.data === YT.PlayerState.ENDED) next();
+          if (e.data === YT.PlayerState.ENDED) completed();
           if (e.data === YT.PlayerState.PLAYING) {
             clearTimeout(watchdog);
             state.playing = true;
@@ -355,7 +366,7 @@
       if (state.current) markLivenessOk(state.current);
     });
     sc.bind(E.PAUSE, () => { state.playing = false; });
-    sc.bind(E.FINISH, () => next());
+    sc.bind(E.FINISH, () => completed());
     if (E.ERROR) {
       sc.bind(E.ERROR, () => {
         clearTimeout(watchdog);
@@ -516,18 +527,16 @@
 
   $("tJump").addEventListener("click", jumpToCurrent);
   $("tJump").disabled = true;
+  /* The document top, not a computed offset. Offsetting by the sticky chrome is
+   * circular: the tracklist's document position depends on the pinned block's
+   * flow height, which depends on whether the stage is collapsed, which depends
+   * on the very scroll position being computed. At y=0 the stage is expanded by
+   * definition and the list starts directly below it, which is what "top of the
+   * list" should mean anyway. */
   $("tTop").addEventListener("click", () => {
-    /* The document top, not a computed offset. Offsetting by the sticky chrome
-     * is circular here: the tracklist's document position depends on the
-     * pinned block's flow height, which depends on whether the stage is
-     * collapsed, which depends on the very scroll position being computed.
-     * That resolved to 0 on one run and came to rest 73px short on another,
-     * permanently, with the first rows behind the pinned block.
-     *
-     * At y=0 the stage is expanded by definition and the list starts directly
-     * below it, which is what "top of the list" should mean anyway. */
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
+
   $("tBottom").addEventListener("click", () => {
     bulkRender = true;                       // one repaint, not one per chunk
     while (state.shown < state.order.length) renderChunk();
@@ -537,6 +546,16 @@
   });
 
   // the transport heart mirrors the row hearts for whatever is playing
+  $("statPlayed").addEventListener("click", resetPlayed);
+
+  /* The only seam in the app that exists partly for the tests, and it is here
+   * because the alternative is leaving Jukebox 3 unverified: both end events
+   * fire inside a cross-origin iframe and cannot be synthesised from outside
+   * it. It is a fair extension point in its own right — anything may declare
+   * a track finished — and it carries no privilege the UI does not already
+   * have. Everything else in the suite drives real controls. */
+  document.addEventListener("mash:completed", completed);
+
   $("tFav").addEventListener("click", () => {
     if (!state.current) return;
     const row = rowFor(state.current.k);
@@ -598,6 +617,59 @@
     if (!track) return -1;
     const viewIdx = state.view.findIndex((t) => t.k === track.k);
     return viewIdx < 0 ? -1 : state.order.indexOf(viewIdx);
+  }
+
+  /* Played to completion, not skipped. Both players' end events land here and
+   * nowhere else, so pressing Next can never decay a track. */
+  function completed() {
+    const track = state.current;
+    if (!track) { next(); return; }
+
+    // where it sat, so playback resumes at whatever moves up into its place
+    const pos = positionOf(track);
+    played.add(track.k);
+    store.write(K_PLAYED, [...played]);
+
+    let done = false;
+    const advance = () => {
+      if (done) return;
+      done = true;
+      render(true);                 // the track leaves the view here
+      resumeFrom(pos);
+      paintStatus();
+    };
+
+    const row = rowFor(track.k);
+    if (!row) { advance(); return; }        // never rendered, nothing to pop
+    row.classList.add("is-popping");
+    row.addEventListener("animationend", advance, { once: true });
+    // animationend never fires if the row is display:none, and reduced motion
+    // caps the duration to .01ms — either way, do not strand playback
+    setTimeout(advance, 600);
+  }
+
+  /* Resume at a position rather than a track: the one that was playing is no
+   * longer in the view, so everything after it has shifted up by one. */
+  function resumeFrom(pos) {
+    if (!state.order.length) return;
+    const start = pos < 0 ? 0 : pos % state.order.length;
+    for (let i = 0; i < state.order.length; i++) {
+      const idx = (start + i) % state.order.length;
+      const candidate = state.view[state.order[idx]];
+      if (!isSkippable(candidate)) {
+        while (state.shown <= idx && state.shown < state.order.length) renderChunk();
+        play(candidate);
+        return;
+      }
+    }
+  }
+
+  function resetPlayed() {
+    if (!played.size) return;
+    played.clear();
+    store.write(K_PLAYED, []);
+    render(true);
+    paintStatus();
   }
 
   function step(delta) {

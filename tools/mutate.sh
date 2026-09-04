@@ -215,5 +215,43 @@ mut 'jump-to-top leaves the list behind the chrome' app.js \
   '    window.scrollTo({ top: 400, behavior: "smooth" });' \
   tests/transport.spec.js 'jumps to the top'
 
+# ---------------------------------------------------------- milestone 8
+
+mut 'skipping counts as listening' app.js \
+  '  $("bNext").addEventListener("click", next);' \
+  '  $("bNext").addEventListener("click", completed);' \
+  tests/decay.spec.js 'skipping is not listening'
+
+mut 'a finished track is never recorded' app.js \
+  '    played.add(track.k);' \
+  '    void track.k;' \
+  tests/decay.spec.js 'leaves the list and is remembered'
+
+mut 'played tracks are not filtered out of the view' app.js \
+  '      if (played.has(t.k)) return false;' \
+  '      if (false && played.has(t.k)) return false;' \
+  tests/decay.spec.js 'gone from every surface'
+
+mut 'the decay is never persisted' app.js \
+  '    store.write(K_PLAYED, [...played]);' \
+  '    void K_PLAYED;' \
+  tests/decay.spec.js 'survives a reload'
+
+mut 'playback resumes one past the gap' app.js \
+  '      resumeFrom(pos);' \
+  '      resumeFrom(pos + 1);' \
+  tests/decay.spec.js 'moved up into the gap'
+
+mut 'the row is removed without popping' app.js \
+  '    row.classList.add("is-popping");' \
+  '    void row;' \
+  tests/decay.spec.js 'row pops before it goes'
+
+mut 'reset clears the view but not the store' app.js \
+  '    played.clear();
+    store.write(K_PLAYED, []);' \
+  '    played.clear();' \
+  tests/decay.spec.js 'brings it back'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi
