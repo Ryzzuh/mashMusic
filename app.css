@@ -189,8 +189,9 @@ button { font: inherit; color: inherit; }
   padding: 0 10px;
   height: 34px;
   /* shrinks before anything collapses, but never below a usable field —
-     the floor is what makes the overflow measurable */
-  flex: 1 1 240px !important;
+     the floor is what makes the overflow measurable. No !important needed:
+     this rule and `.tools > *` have equal specificity and this one is later. */
+  flex: 1 1 240px;
   min-width: 124px;
   max-width: 300px;
   background: var(--sunk);
@@ -1264,4 +1265,15 @@ main {
 @media (max-width: 560px) {
   .brand-note { display: none; }   /* the count also lives in the statusbar */
   .topbar { gap: 12px; padding: 0 12px; }
+}
+
+/* Under ~340px both controls are already collapsed and the search is pinned at
+ * its floor, so there is nothing left to give and the document starts to
+ * scroll sideways. 320px is still a live target: iPhone SE 1st gen, the Galaxy
+ * Fold cover screen, and any 360px phone at 110% text zoom. */
+@media (max-width: 340px) {
+  .topbar { gap: 8px; padding: 0 8px; }
+  .brand { font-size: 17px; }
+  .brand-mark.alt { display: none; }   /* "mash" alone still reads as the mark */
+  .search { min-width: 96px; }
 }

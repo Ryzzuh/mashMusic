@@ -147,38 +147,113 @@ test("the pill is highlighted only when a non-default mode is active", async ({ 
 
 /* ------------------------------------------------- QoL 2: one bar height */
 
-test("the top bar holds one height from 1600px down to 360px", async ({ page }) => {
-  /* It used to wrap to 103px at 800 and 149px at 560.
-   *
-   * 2px steps, not 20. The window where a rounding tolerance leaks a pixel of
-   * horizontal scroll is exactly one pixel wide, and a 20px sweep stepped
-   * straight over it: 684px with the fallback fonts this suite runs under,
-   * 440px with the real ones. See DECISIONS.md on font fidelity. */
-  test.setTimeout(180_000);
-  const bad = [];
-  /* 2px only below 900, where controls actually collapse and a one-pixel
-   * overflow window can exist; above it the bar has hundreds of pixels of
-   * slack and nothing moves, so 20px is enough. A flat 2px sweep over the
-   * whole range is ~620 viewport resizes and overran the test budget. */
-  const widths = [];
-  for (let w = 1600; w > 900; w -= 20) widths.push(w);
-  for (let w = 900; w >= 360; w -= 2) widths.push(w);
+/* Settle to a painted frame. A ResizeObserver callback runs before paint, so a
+ * sub-frame sleep measures the previous layout: at a 9ms wait every collapse
+ * boundary below reports 1px high. Two rAFs is the reliable wait. */
+const settle = (page) =>
+  page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
-  for (const w of widths) {
-    await page.setViewportSize({ width: w, height: 820 });
-    await page.waitForTimeout(14);
-    const m = await page.evaluate(() => {
-      const bar = document.querySelector(".topbar");
-      const d = document.documentElement;
-      return {
-        h: Math.round(bar.getBoundingClientRect().height),
-        barOverflow: bar.scrollWidth - bar.clientWidth,
-        docOverflow: d.scrollWidth - d.clientWidth,
-      };
-    });
-    if (m.h !== 59 || m.barOverflow > 0 || m.docOverflow > 0) bad.push({ w, ...m });
+async function barMetrics(page, w) {
+  await page.setViewportSize({ width: w, height: 820 });
+  await settle(page);
+  return page.evaluate(() => {
+    const bar = document.querySelector(".topbar");
+    const doc = document.documentElement;
+    const brand = bar.querySelector(".brand").getBoundingClientRect();
+    const tools = bar.querySelector(".tools").getBoundingClientRect();
+    return {
+      h: Math.round(bar.getBoundingClientRect().height),
+      barOverflow: bar.scrollWidth - bar.clientWidth,
+      docOverflow: doc.scrollWidth - doc.clientWidth,
+      // .topbar has a FIXED height, so it can never report a taller box —
+      // wrapped children spill out of it instead. Height alone is blind to
+      // the exact regression this milestone exists to prevent.
+      spill: bar.scrollHeight - bar.clientHeight,
+      wrapped: tools.top >= brand.bottom,
+      collapsed: document.getElementById("toolsPanel").children.length,
+    };
+  });
+}
+
+const isBad = (m) =>
+  m.h !== 59 || m.barOverflow > 0 || m.docOverflow > 0 || m.spill > 0 || m.wrapped;
+
+test("the top bar holds one height and never wraps, 320px to 1600px", async ({ page }) => {
+  test.setTimeout(120_000);
+  // it used to wrap to 103px at 800 and 149px at 560
+  const bad = [];
+  for (let w = 1600; w >= 320; w -= 20) {
+    const m = await barMetrics(page, w);
+    if (isBad(m)) bad.push({ w, ...m });
   }
   expect(bad).toEqual([]);
+});
+
+test("no overflow within a pixel of either collapse boundary", async ({ page }) => {
+  test.setTimeout(120_000);
+  /* A uniform sweep is the wrong instrument. The window where a rounding
+   * tolerance leaks a pixel of horizontal scroll is exactly ONE pixel wide,
+   * so a 2px sweep finds it with probability 1/2 — it depends on the parity
+   * of the boundary, which is not a designed property. There are two
+   * boundaries (one per collapsible control), and loading the real fonts
+   * shifts each by 1px, flipping that parity.
+   *
+   * So: binary-search each boundary, then check every integer width around
+   * it. ~40 resizes instead of 600, and it cannot miss on parity. */
+  const countAt = async (w) => (await barMetrics(page, w)).collapsed;
+
+  const boundaries = [];
+  for (const target of [1, 2]) {
+    let lo = 320, hi = 1600;                 // count is monotonic as width falls
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (await countAt(mid) >= target) lo = mid; else hi = mid;
+    }
+    boundaries.push(lo);
+  }
+  expect(boundaries.length).toBe(2);
+  expect(boundaries[0]).toBeGreaterThan(boundaries[1]);
+
+  const bad = [];
+  for (const b of boundaries) {
+    for (let w = Math.min(1600, b + 4); w >= Math.max(320, b - 4); w -= 1) {
+      const m = await barMetrics(page, w);
+      if (isBad(m)) bad.push({ w, boundary: b, ...m });
+    }
+  }
+  expect(bad).toEqual([]);
+});
+
+test("changing the list mode near a boundary does not overflow", async ({ page }) => {
+  /* The pill's label is the only live-width element in the bar: "Shown" ->
+   * "Obfuscated" moves the first collapse boundary by ~37px. The
+   * ResizeObserver watches .topbar, whose size never changes, so nothing
+   * noticed until the next window resize — this left 34px of permanent
+   * horizontal document scroll. */
+  const boundary = await (async () => {
+    let lo = 320, hi = 1600;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if ((await barMetrics(page, mid)).collapsed >= 1) lo = mid; else hi = mid;
+    }
+    return lo;
+  })();
+
+  for (const w of [boundary + 4, boundary + 20, boundary + 40]) {
+    const before = await barMetrics(page, w);
+    expect(isBad(before), `clean before at ${w}`).toBe(false);
+
+    await page.click("#listModeMore");
+    await page.click('#listModeMenu button[data-listmode="blur"]');
+    await settle(page);
+    const after = await barMetrics(page, w);
+    expect({ w, ...after }, "widening the pill must not overflow").toMatchObject({
+      docOverflow: 0, barOverflow: 0, h: 59,
+    });
+
+    await page.click("#listModeCurrent");     // back to Shown
+    await settle(page);
+  }
 });
 
 test("controls collapse into the panel and come back when there is room", async ({ page }) => {
@@ -221,10 +296,21 @@ test("the collapsed theme and list-mode controls still work", async ({ page }) =
 
   await page.click("#toolsMore");
   await expect(page.locator("#toolsPanel")).toBeVisible();
-  // the panel is absolutely positioned specifically so it cannot add to the
-  // bar's height — check it did not, and that its contents are reachable
-  expect(await page.evaluate(() =>
-    Math.round(document.querySelector(".topbar").getBoundingClientRect().height))).toBe(59);
+  /* The panel is absolutely positioned so it cannot add to the bar. Asserting
+   * the bar is still 59px tall proves nothing — `height` is fixed in CSS, so
+   * that holds however the panel is laid out. And scrollHeight is no good
+   * either: an out-of-flow panel hanging below the bar legitimately extends
+   * it. What distinguishes the two is where the panel lands — out of flow it
+   * drops below the bar; as a flex item it stays inside .tools and pushes its
+   * contents off screen (the night button lands at y:-11). */
+  const geo = await page.evaluate(() => {
+    const bar = document.querySelector(".topbar").getBoundingClientRect();
+    const panel = document.getElementById("toolsPanel").getBoundingClientRect();
+    const tools = document.querySelector(".tools").getBoundingClientRect();
+    return { barBottom: bar.bottom, panelTop: panel.top, toolsH: tools.height };
+  });
+  expect(geo.panelTop).toBeGreaterThanOrEqual(geo.barBottom);
+  expect(geo.toolsH).toBeLessThanOrEqual(40);
   expect(await isHittable(page, '#toolsPanel button[data-skin="night"]')).toMatchObject({ ok: true });
 
   await page.click('#toolsPanel button[data-skin="night"]');
@@ -256,4 +342,79 @@ test("the panel closes on outside click and on Escape", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(page.locator("#toolsPanel")).toBeHidden();
   await expect(page.locator("#toolsMore")).toBeFocused();
+});
+
+test("Escape closes one layer at a time", async ({ page }) => {
+  /* Two separate document keydown listeners could not do this: the picker's
+   * own ran first and set listModeMenu.hidden synchronously, so the panel's
+   * guard on that flag always read true and a single press collapsed both. */
+  await page.setViewportSize({ width: 400, height: 820 });
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+
+  await page.click("#toolsMore");
+  await page.click("#listModeMore");
+  await expect(page.locator("#listModeMenu")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#listModeMenu")).toBeHidden();
+  await expect(page.locator("#toolsPanel")).toBeVisible();      // panel survives
+  await expect(page.locator("#listModeMore")).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#toolsPanel")).toBeHidden();
+  await expect(page.locator("#toolsMore")).toBeFocused();
+});
+
+test("closing the panel does not strand the picker open behind it", async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 820 });
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+
+  await page.click("#toolsMore");
+  await page.click("#listModeMore");
+  await expect(page.locator("#listModeMore")).toHaveAttribute("aria-expanded", "true");
+
+  await page.click("#toolsMore");                    // close the panel around it
+  await expect(page.locator("#toolsPanel")).toBeHidden();
+  await expect(page.locator("#listModeMenu")).toBeHidden();
+  await expect(page.locator("#listModeMore")).toHaveAttribute("aria-expanded", "false");
+
+  // and re-opening must not reveal an already-expanded picker
+  await page.click("#toolsMore");
+  await expect(page.locator("#listModeMenu")).toBeHidden();
+});
+
+test("widening with the picker open leaves nothing floating", async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 820 });
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+  await page.click("#toolsMore");
+  await page.click("#listModeMore");
+  await expect(page.locator("#listModeMenu")).toBeVisible();
+
+  await page.setViewportSize({ width: 1100, height: 820 });
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(0);
+  await expect(page.locator("#listModeMenu")).toBeHidden();
+  await expect(page.locator("#toolsPanel")).toBeHidden();
+  await expect(page.locator("#listModeMore")).toHaveAttribute("aria-expanded", "false");
+});
+
+test("a reflow does not throw keyboard focus away", async ({ page }) => {
+  /* Moving a focused node between containers blurs it, and so does hiding one:
+   * toolsMore.hidden = true runs on every pass, and reading scrollWidth right
+   * after forces the flush that drops focus to <body>. A 2px resize that
+   * changes nothing at all was destroying focus — which on a phone fires from
+   * URL-bar collapse, the on-screen keyboard, and rotation. */
+  await page.setViewportSize({ width: 400, height: 820 });
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+
+  await page.focus("#toolsMore");
+  await page.setViewportSize({ width: 398, height: 820 });
+  await settle(page);
+  await expect(page.locator("#toolsMore")).toBeFocused();
+
+  // and focus follows a control that gets re-parented back onto the bar
+  await page.click("#toolsMore");
+  await page.focus('#toolsPanel button[data-skin="night"]');
+  await page.setViewportSize({ width: 1100, height: 820 });
+  await settle(page);
+  await expect(page.locator('.tools > .skin-switch button[data-skin="night"]')).toBeFocused();
 });

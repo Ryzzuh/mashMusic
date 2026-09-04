@@ -67,20 +67,20 @@ mut "a stored source filter is read but never applied" app.js \
 
 # ---------------------------------------------------------- milestone 5
 
-mut 'the top bar is allowed to wrap again' app.css \
-  '  flex-wrap: nowrap;
-  align-items: center;
-  gap: 20px;
-  height: var(--topbar-h);' \
-  '  flex-wrap: wrap;
-  align-items: center;
-  gap: 14px 20px;' \
-  tests/topbar.spec.js 'holds one height'
+# ONE property. The previous version of this check also deleted
+# `height: var(--topbar-h)`, and it was the missing height that turned the test
+# red — so it proved the height declaration exists, not that the bar cannot
+# wrap. With the height kept, wrap-only spilled .tools 28px below the bar at
+# 212 of 306 sampled widths while every assertion stayed green.
+mut 'the top bar is allowed to wrap (wrap only)' app.css \
+  '  flex-wrap: nowrap;' \
+  '  flex-wrap: wrap;' \
+  tests/topbar.spec.js 'holds one height and never wraps'
 
 mut '1px of overflow tolerance comes back' app.js \
   '    return bar.scrollWidth > bar.clientWidth;' \
   '    return bar.scrollWidth > bar.clientWidth + 1;' \
-  tests/topbar.spec.js 'holds one height'
+  tests/topbar.spec.js 'within a pixel of either collapse boundary'
 
 mut 'collapsed controls are never restored to the bar' app.js \
   '    for (const sel of COLLAPSE_ORDER) {
@@ -104,6 +104,28 @@ mut 'the overflow panel is laid out in flow' app.css \
   '.tools-panel {
   position: static;' \
   tests/topbar.spec.js 'collapsed theme'
+
+mut 'a widening label never triggers a reflow' app.js \
+  '    reflowTools();
+    render(false);' \
+  '    render(false);' \
+  tests/topbar.spec.js 'near a boundary does not overflow'
+
+mut 'focus is not restored after a reflow' app.js \
+  '    if (owned && prev.isConnected && document.activeElement !== prev)
+      prev.focus({ preventScroll: true });' \
+  '    void owned;' \
+  tests/topbar.spec.js 'throw keyboard focus away'
+
+mut 'Escape falls through both layers at once' app.js \
+  '    if (!listModeMenu.hidden) { openListMenu(false, true); return; }' \
+  '    if (!listModeMenu.hidden) { openListMenu(false, true); }' \
+  tests/topbar.spec.js 'one layer at a time'
+
+mut 'closing the panel leaves the picker open behind it' app.js \
+  '    if (!open) openListMenu(false);' \
+  '    void open;' \
+  tests/topbar.spec.js 'strand the picker'
 
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

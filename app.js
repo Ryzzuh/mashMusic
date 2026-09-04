@@ -1470,6 +1470,10 @@
     prefs.listMode = mode;
     store.write(K_PREF, prefs);
     openListMenu(false, true);
+    // "Shown" -> "Obfuscated" widens the pill and moves the collapse boundary
+    // by ~37px. The ResizeObserver watches .topbar, whose size never changes,
+    // so nothing else would notice until the next window resize.
+    reflowTools();
     render(false);
   }
 
@@ -1485,8 +1489,14 @@
   document.addEventListener("click", (e) => {
     if (!listModeMenu.hidden && !e.target.closest(".listmode")) openListMenu(false);
   });
+  /* One handler for both layers. Two separate listeners could not work: the
+   * picker's own ran first and set listModeMenu.hidden synchronously, so the
+   * panel's guard on that flag always read true and both layers collapsed on
+   * a single press. */
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !listModeMenu.hidden) openListMenu(false, true);
+    if (e.key !== "Escape") return;
+    if (!listModeMenu.hidden) { openListMenu(false, true); return; }
+    if (!toolsPanel.hidden) { openToolsPanel(false); toolsMore.focus(); }
   });
 
   document.querySelectorAll("[data-skin]").forEach((btn) => {
@@ -1516,11 +1526,13 @@
   const toolsEl = document.querySelector(".tools");
   const toolsPanel = $("toolsPanel");
   const toolsMore = $("toolsMore");
-  let reflowing = false;
 
   function openToolsPanel(open) {
     toolsPanel.hidden = !open;
     toolsMore.setAttribute("aria-expanded", String(open));
+    // the picker lives inside the panel while collapsed; closing the panel
+    // around an open picker leaves it dangling with aria-expanded="true"
+    if (!open) openListMenu(false);
   }
 
   function toolsOverflow() {
@@ -1530,9 +1542,23 @@
     return bar.scrollWidth > bar.clientWidth;
   }
 
+  /* No re-entrancy guard, deliberately. There is nothing to guard against:
+   * .topbar has a fixed height and viewport width, so none of the moves below
+   * can resize the observed box and re-fire the observer. A flag here would
+   * advertise loop protection it does not actually provide — if this element
+   * ever gains an intrinsic height, or if anything starts observing .tools
+   * (which IS content-sized, and which reflowTools resizes), that is a real
+   * feedback loop and it needs a real fix, not a synchronous boolean. */
   function reflowTools() {
-    if (reflowing) return;
-    reflowing = true;
+    /* Moving a focused node between containers blurs it, and so does hiding
+     * one — Chromium's focus fix-up drops it to <body> the moment scrollWidth
+     * forces a layout flush. openListMenu already documents this trap; this
+     * function has to handle the same one. */
+    const prev = document.activeElement;
+    const owned = prev && (prev === toolsMore ||
+      toolsEl.contains(prev) || toolsPanel.contains(prev));
+
+    openListMenu(false);            // a floating picker cannot survive a reparent
 
     for (const sel of COLLAPSE_ORDER) {
       const el = toolsPanel.querySelector(sel);
@@ -1552,7 +1578,9 @@
       toolsMore.hidden = true;
       openToolsPanel(false);
     }
-    reflowing = false;
+
+    if (owned && prev.isConnected && document.activeElement !== prev)
+      prev.focus({ preventScroll: true });
   }
 
   toolsMore.addEventListener("click", (e) => {
@@ -1562,12 +1590,6 @@
   document.addEventListener("click", (e) => {
     if (!toolsPanel.hidden && !e.target.closest(".tools-panel, .tools-more"))
       openToolsPanel(false);
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !toolsPanel.hidden && listModeMenu.hidden) {
-      openToolsPanel(false);
-      toolsMore.focus();
-    }
   });
 
   new ResizeObserver(reflowTools).observe(document.querySelector(".topbar"));

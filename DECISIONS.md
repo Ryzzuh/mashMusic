@@ -19,12 +19,31 @@ fallback system fonts, in a layout no user ever sees.**
 
 It surfaced because a mutation escaped. Restoring a 1px rounding tolerance in
 the top bar leaks a pixel of horizontal scroll in a window exactly one pixel
-wide — at 684px under the fallback fonts the tests use, and at 440px under the
-real ones. The suite's 20px sweep stepped over both. It now sweeps at 2px, so
-the check holds under either, but the underlying mismatch remains.
+wide, and the suite's 20px sweep stepped over it.
 
-**Chosen (for now):** the 2px sweep, and this entry. I did not change how fonts
-load, because that is a production change you did not ask for.
+**Correction to what I first wrote here.** I originally recorded this as a
+single leak window that "moves" from 684px under the fallback fonts to 440px
+under the real ones. That was wrong, and the milestone-5 review caught it.
+Scanning every integer width shows there are **two** collapse boundaries, one
+per collapsible control, and the real fonts shift each by exactly **one pixel**:
+
+    fallback fonts (what the suite runs):  boundaries at 684 and 439
+    real fonts (what users see):           boundaries at 685 and 440
+
+So the font-driven shift is 1px, not the ~244px I implied; 440 is simply the
+second boundary, which I had misattributed to the first. The practical
+consequence is worse than the version I wrote: a uniform sweep detects a
+one-pixel window only if the boundary's parity happens to match the sweep's,
+and self-hosting the fonts would have flipped one of these from caught to
+missed without anything appearing to change.
+
+**Chosen:** the sweep is gone. The test now binary-searches each boundary and
+checks every integer width within 4px of it — about 40 resizes instead of 600,
+faster, and immune to parity. This entry stands as the record of the fidelity
+gap itself, which is unfixed.
+
+I did not change how fonts load, because that is a production change you did
+not ask for.
 
 **What I would do:** self-host the three families in `assets/fonts/` and
 replace the `@import` with local `@font-face` rules. All three are Open Font
