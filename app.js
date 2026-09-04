@@ -1500,6 +1500,82 @@
     });
   });
 
+  /* ------------------------------------------ topbar overflow (QoL 2)
+   *
+   * The bar holds one height at every width. The search shrinks first, down to
+   * its own floor; past that, whole controls move into a panel behind a "more"
+   * button rather than wrapping the bar to a second row.
+   *
+   * Collapse order is least-used-first: the theme is set once and left alone,
+   * the list-mode picker is reached for more often, and the search is never
+   * collapsed because it is the only way to reach a specific track in 1,257.
+   *
+   * Every pass starts from fully expanded, so widening the window restores
+   * controls to the bar instead of stranding them in the panel. */
+  const COLLAPSE_ORDER = [".skin-switch", ".listmode"];
+  const toolsEl = document.querySelector(".tools");
+  const toolsPanel = $("toolsPanel");
+  const toolsMore = $("toolsMore");
+  let reflowing = false;
+
+  function openToolsPanel(open) {
+    toolsPanel.hidden = !open;
+    toolsMore.setAttribute("aria-expanded", String(open));
+  }
+
+  function toolsOverflow() {
+    // no tolerance: a 1px slack here is a 1px horizontal scrollbar on the
+    // document, which is the same defect the transport flanks shipped with
+    const bar = document.querySelector(".topbar");
+    return bar.scrollWidth > bar.clientWidth;
+  }
+
+  function reflowTools() {
+    if (reflowing) return;
+    reflowing = true;
+
+    for (const sel of COLLAPSE_ORDER) {
+      const el = toolsPanel.querySelector(sel);
+      if (el) toolsEl.insertBefore(el, toolsMore);
+    }
+    toolsMore.hidden = true;
+
+    for (const sel of COLLAPSE_ORDER) {
+      if (!toolsOverflow()) break;
+      // unhide before measuring again: the button itself takes width
+      toolsMore.hidden = false;
+      const el = toolsEl.querySelector(sel);
+      if (el) toolsPanel.appendChild(el);
+    }
+
+    if (!toolsPanel.children.length) {
+      toolsMore.hidden = true;
+      openToolsPanel(false);
+    }
+    reflowing = false;
+  }
+
+  toolsMore.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openToolsPanel(toolsPanel.hidden);
+  });
+  document.addEventListener("click", (e) => {
+    if (!toolsPanel.hidden && !e.target.closest(".tools-panel, .tools-more"))
+      openToolsPanel(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !toolsPanel.hidden && listModeMenu.hidden) {
+      openToolsPanel(false);
+      toolsMore.focus();
+    }
+  });
+
+  new ResizeObserver(reflowTools).observe(document.querySelector(".topbar"));
+  reflowTools();
+  // web fonts change the width of every label; measuring before they land
+  // leaves the bar collapsed one control too early
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(reflowTools);
+
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea")) return;
     if (contribModal.open) return;

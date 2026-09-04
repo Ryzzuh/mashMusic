@@ -6,6 +6,71 @@ to undo it.
 
 ---
 
+## 2026-09-04 — Every layout test has been measuring the wrong fonts
+
+**Unclear:** nothing was unclear. This is a defect in the suite that milestone
+5 exposed, and it needs your decision because the fix touches production.
+
+**What is wrong:** `app.css:1` imports Archivo, Barlow and IBM Plex Mono from
+`fonts.googleapis.com`. `tests/helpers.js:11` blocks `googleapis.com` and
+`gstatic.com` so runs are hermetic. Both are reasonable on their own; together
+they mean **every geometry assertion in this suite has been measured against
+fallback system fonts, in a layout no user ever sees.**
+
+It surfaced because a mutation escaped. Restoring a 1px rounding tolerance in
+the top bar leaks a pixel of horizontal scroll in a window exactly one pixel
+wide — at 684px under the fallback fonts the tests use, and at 440px under the
+real ones. The suite's 20px sweep stepped over both. It now sweeps at 2px, so
+the check holds under either, but the underlying mismatch remains.
+
+**Chosen (for now):** the 2px sweep, and this entry. I did not change how fonts
+load, because that is a production change you did not ask for.
+
+**What I would do:** self-host the three families in `assets/fonts/` and
+replace the `@import` with local `@font-face` rules. All three are Open Font
+License, so redistribution is fine. It makes the tests faithful, removes a
+render-blocking third-party request from first paint, and stops every visitor's
+browser announcing itself to Google. Roughly 200 KB in the repo. The one risk
+is picking subtly different weights or subsets than the CDN serves, which would
+shift the very geometry the suite pins — so it wants a careful before/after
+comparison rather than a 2am change.
+
+**Reverse:** nothing to reverse yet.
+
+---
+
+## 2026-09-04 — Milestone 5: priority-plus, and which control collapses first
+
+**Unclear:** QoL 2 says the bar keeps one height and children "collapse into a
+menu rather than wrapping", without saying which children or in what order.
+
+**Chosen:** the search shrinks first, from 240px down to a 124px floor. Past
+that, whole controls move into a panel behind a "more" button — the theme
+switch first, then the list-mode picker. The search is never collapsed. Every
+reflow starts from fully expanded, so widening restores controls to the bar.
+
+**Why:** the theme is set once and left alone; the list-mode picker is reached
+for more often; and the search is the only way to reach a specific track out of
+1,257, so it is the last thing that should ever go behind a menu. Starting each
+pass from expanded avoids hysteresis, where a control collapsed on the way down
+stays collapsed on the way back up.
+
+**Why the panel is `position: absolute`:** anything in normal flow inside the
+bar can add to its height, which is the one thing this milestone promises it
+cannot do. There is a mutation check for exactly that.
+
+**Why no rounding tolerance:** `toolsOverflow()` compares `scrollWidth` to
+`clientWidth` with no slack. A 1px tolerance is a 1px horizontal scrollbar on
+the document — the same defect the transport flanks shipped with in milestone 4.
+
+**Result:** 59px at every width from 360 to 1600, zero overflow, verified at
+2px granularity. It was 59 / 103 / 149 / 147 before.
+
+**Reverse:** `--topbar-h` and the `.topbar` rule in `app.css`; the topbar
+overflow block in `app.js`; `#toolsMore` and `#toolsPanel` in `index.html`.
+
+---
+
 ## 2026-09-04 — Mutation checks became a script, not a habit
 
 **Unclear:** the plan says "any new pixel assertion gets checked by

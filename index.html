@@ -31,6 +31,7 @@
     <symbol id="i-wheel" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/><path d="M12 3v6.4M12 14.6V21M3 12h6.4M14.6 12H21"/></symbol>
     <symbol id="i-caret" viewBox="0 0 24 24"><path d="M6 9.5 12 15.5 18 9.5"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16.2 16.2 21 21"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></symbol>
   </defs>
 </svg>
 
@@ -83,6 +84,12 @@
       </span>
       <button data-skin="night" aria-pressed="false">Night Dial</button>
     </div>
+
+    <button class="tools-more" id="toolsMore" hidden aria-haspopup="true"
+            aria-controls="toolsPanel" aria-expanded="false" aria-label="More controls">
+      <svg aria-hidden="true"><use href="#i-dots"></use></svg>
+    </button>
+    <div class="tools-panel" id="toolsPanel" hidden></div>
   </div>
 </header>
 

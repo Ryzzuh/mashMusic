@@ -144,3 +144,116 @@ test("the pill is highlighted only when a non-default mode is active", async ({ 
   await page.click("#listModeCurrent");
   expect(await active()).toBe(false);
 });
+
+/* ------------------------------------------------- QoL 2: one bar height */
+
+test("the top bar holds one height from 1600px down to 360px", async ({ page }) => {
+  /* It used to wrap to 103px at 800 and 149px at 560.
+   *
+   * 2px steps, not 20. The window where a rounding tolerance leaks a pixel of
+   * horizontal scroll is exactly one pixel wide, and a 20px sweep stepped
+   * straight over it: 684px with the fallback fonts this suite runs under,
+   * 440px with the real ones. See DECISIONS.md on font fidelity. */
+  test.setTimeout(180_000);
+  const bad = [];
+  /* 2px only below 900, where controls actually collapse and a one-pixel
+   * overflow window can exist; above it the bar has hundreds of pixels of
+   * slack and nothing moves, so 20px is enough. A flat 2px sweep over the
+   * whole range is ~620 viewport resizes and overran the test budget. */
+  const widths = [];
+  for (let w = 1600; w > 900; w -= 20) widths.push(w);
+  for (let w = 900; w >= 360; w -= 2) widths.push(w);
+
+  for (const w of widths) {
+    await page.setViewportSize({ width: w, height: 820 });
+    await page.waitForTimeout(14);
+    const m = await page.evaluate(() => {
+      const bar = document.querySelector(".topbar");
+      const d = document.documentElement;
+      return {
+        h: Math.round(bar.getBoundingClientRect().height),
+        barOverflow: bar.scrollWidth - bar.clientWidth,
+        docOverflow: d.scrollWidth - d.clientWidth,
+      };
+    });
+    if (m.h !== 59 || m.barOverflow > 0 || m.docOverflow > 0) bad.push({ w, ...m });
+  }
+  expect(bad).toEqual([]);
+});
+
+test("controls collapse into the panel and come back when there is room", async ({ page }) => {
+  const inPanel = () => page.$$eval("#toolsPanel > *", (e) => e.map((x) => x.className.split(" ")[0]));
+
+  expect(await inPanel()).toEqual([]);              // 1100px: everything on the bar
+  await expect(page.locator("#toolsMore")).toBeHidden();
+
+  await page.setViewportSize({ width: 640, height: 820 });
+  await expect.poll(inPanel).toEqual(["switch"]);   // theme goes first
+  await expect(page.locator("#toolsMore")).toBeVisible();
+
+  await page.setViewportSize({ width: 400, height: 820 });
+  await expect.poll(inPanel).toEqual(["switch", "listmode"]);
+
+  // and widening restores them rather than stranding them in the panel
+  await page.setViewportSize({ width: 1100, height: 820 });
+  await expect.poll(inPanel).toEqual([]);
+  await expect(page.locator("#toolsMore")).toBeHidden();
+  await expect(page.locator(".tools > .skin-switch")).toBeVisible();
+  await expect(page.locator(".tools > .listmode")).toBeVisible();
+});
+
+test("the search is never collapsed and stays usable at 360px", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 820 });
+  await page.waitForTimeout(200);
+  expect(await isHittable(page, "#search")).toMatchObject({ ok: true });
+
+  const box = await page.locator(".search").boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(124);
+
+  await page.fill("#search", "Ben Pearce");
+  await expect.poll(() => page.locator(".trow").count()).toBeGreaterThan(0);
+  await expect.poll(() => page.locator(".trow").count()).toBeLessThan(20);
+});
+
+test("the collapsed theme and list-mode controls still work", async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 820 });
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+
+  await page.click("#toolsMore");
+  await expect(page.locator("#toolsPanel")).toBeVisible();
+  // the panel is absolutely positioned specifically so it cannot add to the
+  // bar's height — check it did not, and that its contents are reachable
+  expect(await page.evaluate(() =>
+    Math.round(document.querySelector(".topbar").getBoundingClientRect().height))).toBe(59);
+  expect(await isHittable(page, '#toolsPanel button[data-skin="night"]')).toMatchObject({ ok: true });
+
+  await page.click('#toolsPanel button[data-skin="night"]');
+  await expect(page.locator("html")).toHaveAttribute("data-skin", "night");
+
+  await page.click("#listModeMore");
+  await page.click('#listModeMenu button[data-listmode="blur"]');
+  await expect(page.locator("#listModeCurrent")).toHaveText("Obfuscated");
+  await expect(page.locator(".tracklist")).toHaveClass(/mode-blur/);
+  // the class is on the list, so assert the effect actually reaches a title.
+  // Obfuscation is the SVG #pixelate filter; the CSS blur is only the
+  // reduced-motion fallback, so accept either but never "none".
+  expect(await page.evaluate(() =>
+    getComputedStyle(document.querySelector(".trow .t-name")).filter))
+    .toMatch(/pixelate|blur/);
+});
+
+test("the panel closes on outside click and on Escape", async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 820 });
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+
+  await page.click("#toolsMore");
+  await expect(page.locator("#toolsPanel")).toBeVisible();
+  await page.click("main", { position: { x: 30, y: 300 } });
+  await expect(page.locator("#toolsPanel")).toBeHidden();
+
+  await page.click("#toolsMore");
+  await expect(page.locator("#toolsPanel")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#toolsPanel")).toBeHidden();
+  await expect(page.locator("#toolsMore")).toBeFocused();
+});

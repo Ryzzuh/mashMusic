@@ -65,5 +65,45 @@ mut "a stored source filter is read but never applied" app.js \
   '    ALL_SOURCES' \
   tests/transport.spec.js "survives a reload"
 
+# ---------------------------------------------------------- milestone 5
+
+mut 'the top bar is allowed to wrap again' app.css \
+  '  flex-wrap: nowrap;
+  align-items: center;
+  gap: 20px;
+  height: var(--topbar-h);' \
+  '  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 20px;' \
+  tests/topbar.spec.js 'holds one height'
+
+mut '1px of overflow tolerance comes back' app.js \
+  '    return bar.scrollWidth > bar.clientWidth;' \
+  '    return bar.scrollWidth > bar.clientWidth + 1;' \
+  tests/topbar.spec.js 'holds one height'
+
+mut 'collapsed controls are never restored to the bar' app.js \
+  '    for (const sel of COLLAPSE_ORDER) {
+      const el = toolsPanel.querySelector(sel);
+      if (el) toolsEl.insertBefore(el, toolsMore);
+    }
+    toolsMore.hidden = true;' \
+  '    if (!toolsPanel.children.length) toolsMore.hidden = true;' \
+  tests/topbar.spec.js 'come back when there is room'
+
+mut 'the search may shrink without a floor' app.css \
+  '  min-width: 124px;
+  max-width: 300px;' \
+  '  min-width: 0;
+  max-width: 300px;' \
+  tests/topbar.spec.js 'search is never collapsed'
+
+mut 'the overflow panel is laid out in flow' app.css \
+  '.tools-panel {
+  position: absolute;' \
+  '.tools-panel {
+  position: static;' \
+  tests/topbar.spec.js 'collapsed theme'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi
