@@ -511,7 +511,7 @@ main {
      columns (18 pad + 40 fav + 12 gap + 54 index + 6), so the flank ends
      exactly there rather than at an eyeballed 1/8. */
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr) 137px;
+  grid-template-columns: 130px minmax(0, 1fr) 172px;
   align-items: stretch;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
@@ -547,9 +547,11 @@ main {
 }
 
 .tflank-fav { justify-self: start; }
+.tflank-fav[disabled] { opacity: .35; cursor: not-allowed; }
+.tjump[disabled] { opacity: .35; cursor: not-allowed; }
 
 /* the jump control, sitting over the track-number column */
-.tjump-wrap { display: flex; align-items: stretch; height: 30px; gap: 2px; }
+.tjump-wrap { display: flex; align-items: stretch; height: 50px; gap: 2px; }
 
 .tjump {
   appearance: none;
@@ -575,7 +577,9 @@ main {
 .tjump-tab {
   display: grid;
   grid-template-rows: 1fr 1fr;
-  width: 12px;
+  /* flex: none, or the wrap shrinks this below the WCAG 2.5.8 target size —
+     it was landing at 23px wide with the width declaration already in place */
+  flex: 0 0 24px;
   gap: 2px;
 }
 .tjump-tab button {
@@ -611,6 +615,7 @@ main {
 /* three stacked readouts */
 .tmetrics {
   margin: 0;
+  min-width: 0;                /* never widen the track it sits in */
   display: grid;
   gap: 1px;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
@@ -623,7 +628,15 @@ main {
   text-transform: uppercase;
   color: var(--ink-3);
 }
-.tmetrics dd { margin: 0; font-size: 10.5px; color: var(--ink-2); }
+.tmetrics dd {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--ink-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 @media (max-width: 760px) {
   .transport { grid-template-columns: 1fr; }

@@ -61,6 +61,7 @@
   const sources = new Set(
     Array.isArray(storedSrc) ? storedSrc.filter((x) => ALL_SOURCES.includes(x)) : ALL_SOURCES
   );
+  if (!sources.size) ALL_SOURCES.forEach((x) => sources.add(x));   // same guard as the click path
 
   const prefs = Object.assign({ skin: "jukebox", listMode: "show" }, store.read(K_PREF, {}));
 
@@ -130,12 +131,17 @@
     state.shown = 0;
   }
 
+  /* A stable random key per track rather than a fresh permutation each time.
+   * shuffleOrder() used to rerun on every buildView(), so a search keystroke
+   * reshuffled the queue and made "tracks remaining" meaningless. */
+  let shuffleKeys = null;
+  function reshuffle() {
+    shuffleKeys = new Map(TRACKS.map((t) => [t.k, Math.random()]));
+  }
   function shuffleOrder() {
-    // A permutation over positions, so the canonical order is never destroyed.
-    for (let i = state.order.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [state.order[i], state.order[j]] = [state.order[j], state.order[i]];
-    }
+    if (!shuffleKeys) reshuffle();
+    state.order.sort((a, b) =>
+      shuffleKeys.get(state.view[a].k) - shuffleKeys.get(state.view[b].k));
   }
 
   // ---------------------------------------------------------------- rendering
@@ -225,6 +231,7 @@
     via.textContent = track.v ? "via " + track.v : "";
   }
 
+  let bulkRender = false;
   function renderChunk() {
     const frag = document.createDocumentFragment();
     const end = Math.min(state.shown + CHUNK, state.order.length);
@@ -234,7 +241,7 @@
     state.shown = end;
     listEl.appendChild(frag);
     $("listEnd").hidden = state.shown < state.order.length;
-    paintStatus();
+    if (!bulkRender) paintStatus();
   }
 
   function render(rebuild) {
@@ -273,9 +280,10 @@
 
   function toggleFav(track, btn) {
     if (favs.has(track.k)) favs.delete(track.k); else favs.add(track.k);
-    btn.setAttribute("aria-pressed", String(favs.has(track.k)));
+    if (btn) btn.setAttribute("aria-pressed", String(favs.has(track.k)));
     store.write(K_FAV, [...favs]);
     if (state.favsOnly) render(true);
+    paintTransportFlanks();
   }
 
   // ---------------------------------------------------------------- players
@@ -507,10 +515,18 @@
   }
 
   $("tJump").addEventListener("click", jumpToCurrent);
-  $("tTop").addEventListener("click", () =>
-    $("tracklist").scrollIntoView({ block: "start", behavior: "smooth" }));
+  $("tJump").disabled = true;
+  $("tTop").addEventListener("click", () => {
+    // the topbar is sticky, so scrolling the list to y=0 hides its first rows
+    const bar = document.querySelector(".topbar").getBoundingClientRect().height;
+    const y = window.scrollY + $("tracklist").getBoundingClientRect().top - bar;
+    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+  });
   $("tBottom").addEventListener("click", () => {
-    while (state.shown < state.order.length) renderChunk();   // the list is windowed
+    bulkRender = true;                       // one repaint, not one per chunk
+    while (state.shown < state.order.length) renderChunk();
+    bulkRender = false;
+    paintStatus();
     $("listEnd").scrollIntoView({ block: "end", behavior: "smooth" });
   });
 
@@ -518,11 +534,10 @@
   $("tFav").addEventListener("click", () => {
     if (!state.current) return;
     const row = rowFor(state.current.k);
-    const btn = row && row.querySelector(".t-fav");
-    if (btn) { btn.click(); return; }               // keeps the row in step
-    if (favs.has(state.current.k)) favs.delete(state.current.k);
-    else favs.add(state.current.k);
-    store.write(K_FAV, [...favs]);
+    // one code path either way: the fallback used to skip toggleFav's
+    // favourites-only rebuild, so un-favouriting an off-screen track left it
+    // sitting in a favourites-only list
+    toggleFav(state.current, row && row.querySelector(".t-fav"));
     paintTransportFlanks();
   });
 
@@ -545,20 +560,29 @@
     $("tFav").setAttribute("aria-pressed", String(!!fav));
     $("tFav").disabled = !state.current;
 
+    // pos < 0 means the playing track is not in the current view, so it is not
+    // part of the queue — both readouts have to agree about that
     const pos = state.current ? positionOf(state.current) : -1;
-    const after = pos < 0 ? state.order.length : state.order.length - pos - 1;
-    $("mTracksLeft").textContent = String(after);
+    const inQueue = pos >= 0;
+    const clock = (secs) => (secs > 0 ? fmtDur(Math.round(secs)) : "0:00");
+
+    $("mTracksLeft").textContent =
+      String(inQueue ? state.order.length - pos - 1 : state.order.length);
 
     const dur = currentDuration();
     const left = dur ? Math.max(0, dur - mediaTime()) : 0;
-    $("mTrackRemain").textContent = state.current ? fmtDur(Math.round(left)) : "--:--";
+    $("mTrackRemain").textContent = state.current ? clock(left) : "--:--";
 
-    // everything still queued, plus what is left of what is playing
-    let total = left;
-    for (let i = Math.max(0, pos + 1); i < state.order.length; i++) {
+    let total = inQueue ? left : 0;
+    for (let i = inQueue ? pos + 1 : 0; i < state.order.length; i++) {
       total += state.view[state.order[i]].d || 0;
     }
-    $("mAllRemain").textContent = total ? fmtDur(Math.round(total)) : "--:--";
+    $("mAllRemain").textContent = state.order.length || inQueue ? clock(total) : "--:--";
+
+    $("tJump").disabled = !inQueue;
+
+    const filtered = sources.size !== ALL_SOURCES.length;
+    $("statSrc").textContent = filtered ? [...sources].join("") + " only" : "";
   }
   setInterval(paintTransportFlanks, 1000);
 
@@ -629,6 +653,7 @@
 
   $("bRandom").addEventListener("click", (e) => {
     state.shuffle = !state.shuffle;
+    if (state.shuffle) reshuffle();          // a new order only on demand
     e.currentTarget.setAttribute("aria-pressed", String(state.shuffle));
     render(true);
   });

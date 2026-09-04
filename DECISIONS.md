@@ -6,6 +6,58 @@ to undo it.
 
 ---
 
+## 2026-09-04 — Mutation checks became a script, not a habit
+
+**Unclear:** the plan says "any new pixel assertion gets checked by
+deliberately breaking the thing it claims to measure". That was a habit I kept
+by hand, and it kept failing — seven tests have now shipped green while
+measuring nothing.
+
+**Chosen:** `tools/mutate.sh`. Each entry patches one line of `app.js`, runs
+the single test covering it, and requires a failure. Five checks so far.
+
+**Why:** the milestone-4 review found `transport.spec.js` asserting
+`|listTop| < 30`, a quantity that is true *precisely when* the sticky topbar is
+covering the first rows — the assertion was calibrated to the defect. Fixing
+the bug turned that test red, which is how it was found. Two of my replacement
+tests then passed against stubbed-out implementations: "jump to current" was
+satisfied by the focus-scroll that any transport click triggers, because the
+playing track was row 0 and therefore already visible from the top of the
+document; and the heart's fallback test never reached the fallback, because
+favourites-only with a single favourite renders the row it needs to be missing.
+Both are now written so the mutation turns them red.
+
+**Reverse:** delete `tools/mutate.sh`. Nothing depends on it; it is not wired
+into `npm test`, because it edits `app.js` in place and a crash would leave a
+`.bak`.
+
+---
+
+## 2026-09-04 — Milestone 4 remediation, from the review
+
+**Unclear:** how far to go on findings the reviewer raised but which were not in
+the spec.
+
+**Chosen:** fixed everything affecting correctness or reach, and left the two
+that need a design decision. Fixed: the readouts flank overflowed the document
+horizontally at every width from 761px up (137px of track holding 86.5px of
+content, now 172px with ellipsis); the jump tab's cells were 23px against
+WCAG 2.5.8's 24px minimum, because the tab was a flex item being shrunk past
+its own `width`; shuffle was re-randomising on every `buildView()`, so any
+keystroke in the search box reshuffled the queue; `#tBottom` triggered 21
+repaints instead of one; the transport heart and the row heart could diverge;
+the readouts showed stale counts when nothing was playing. Deferred: S2 (a
+filter that hides the playing track rewinds the queue to index 0) and A2
+(screen-reader announcement of the readouts).
+
+**Why:** the overflow was live and affected every desktop width. S2 needs a
+decision about whether filtering should preserve playback position or reset,
+which is a product question, not a defect.
+
+**Reverse:** each is a separate hunk in the milestone-4 remediation commit.
+
+---
+
 ## 2026-09-03 — Milestone 4: source filter is two toggles, not a switch
 
 **Unclear:** QoL 7 asks for "a switch between YT and SC — works as a filter".

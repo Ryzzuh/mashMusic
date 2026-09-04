@@ -134,19 +134,19 @@
     <!-- mirrors the tracklist's first two columns so the heart sits above the
          row hearts and the jump control above the track numbers -->
     <div class="tflank tflank-left">
-      <button class="t-fav tflank-fav" id="tFav" aria-pressed="false"
+      <button class="t-fav tflank-fav" id="tFav" type="button" aria-pressed="false" aria-label="Favourite the playing track"
               title="Favourite the playing track">
         <svg><use href="#i-heart"></use></svg>
       </button>
 
       <div class="tjump-wrap">
-        <button class="tjump" id="tJump" title="Jump to the playing track"
+        <button class="tjump" id="tJump" type="button" title="Jump to the playing track"
                 aria-label="Jump to the playing track">
           <svg><use href="#i-target"></use></svg>
         </button>
         <span class="tjump-tab">
-          <button id="tTop" aria-label="Jump to the top of the list" title="Top"></button>
-          <button id="tBottom" aria-label="Jump to the bottom of the list" title="Bottom"></button>
+          <button id="tTop" type="button" aria-label="Jump to the top of the list" title="Top"></button>
+          <button id="tBottom" type="button" aria-label="Jump to the bottom of the list" title="Bottom"></button>
         </span>
       </div>
     </div>
@@ -164,8 +164,8 @@
 
     <div class="tflank tflank-right">
       <div class="tsource" role="group" aria-label="Filter by source">
-        <button id="fltYT" data-source="YT" aria-pressed="true">YT</button>
-        <button id="fltSC" data-source="SC" aria-pressed="true">SC</button>
+        <button id="fltYT" type="button" data-source="YT" aria-pressed="true">YT</button>
+        <button id="fltSC" type="button" data-source="SC" aria-pressed="true">SC</button>
       </div>
       <dl class="tmetrics">
         <div><dt>left</dt><dd id="mAllRemain">--:--</dd></div>
@@ -218,6 +218,7 @@
 <footer class="statusbar">
   <span id="statLoaded">—</span>
   <span id="statDead"></span>
+  <span id="statSrc"></span>
   <span class="stat-spacer"></span>
   <span id="statNote"></span>
 </footer>
