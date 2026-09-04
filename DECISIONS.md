@@ -6,6 +6,112 @@ to undo it.
 
 ---
 
+## 2026-09-04 — Jump-to-top scrolls to the document top, not a computed offset
+
+**Unclear:** where "the top of the list" is, once the chrome above it changes
+height depending on where you are.
+
+**What was wrong:** `#tTop` offset the scroll by the height of the sticky
+chrome. With the pinned stage that calculation is circular — the tracklist's
+document position depends on the pinned block's flow height, which depends on
+whether the stage is collapsed, which depends on the very scroll position being
+computed. It resolved to 0 on one run and came to rest **73px short on
+another, permanently**, leaving the first rows behind the pinned block. Twelve
+samples over five seconds showed it parked there, so this was not a transient.
+
+**Chosen:** `window.scrollTo({ top: 0 })`. At y=0 the stage is expanded by
+definition and the list begins directly below it, which is what the control
+should mean anyway. `stickyOffset()` had no other caller and is deleted rather
+than left as the sort of dead helper the milestone-5 review objected to.
+
+**Reverse:** the `#tTop` handler in `app.js` is three lines.
+
+---
+
+## 2026-09-04 — Three tests that were reading mid-transition
+
+Recording these together because they are one mistake with one shape: asserting
+on a value while CSS was still animating it.
+
+- **jump-to-top**, twice. A fixed 1000ms sampled the smooth scroll in flight at
+  y=18; waiting for the scroll position to stop still caught the 300ms stage
+  expansion that fires once it reaches 0. It now polls the claim itself.
+- **the disabled halo** read 0.018px rather than 0 — the glow was still
+  decaying through its .18s transition.
+- **the button face** compared `backgroundColor` to `--raised` immediately
+  after a theme switch, catching the .15s background transition partway. This
+  one passed alone and failed under load, which is the worst kind: it would
+  have become an intermittent failure for you, not for me.
+
+**The lesson I keep relearning:** a fixed `waitForTimeout` before an assertion
+is a guess about machine speed. Where the value settles, poll for it.
+
+**On a claim I made and had to withdraw:** I reported the jump-to-top failure
+as a deterministic ordering effect, because running `halo.spec.js` before
+`stage.spec.js` reproduced it twice running. It was load sensitivity — the same
+pair passes now. The underlying `#tTop` defect above was real and separate.
+
+---
+
+## 2026-09-04 — Milestone 7: the contrast gate could not see the halo at all
+
+**Unclear:** the spec says the neon halo "must not regress the contrast gate."
+It cannot. The gate in `tests/contrast.spec.js` compares CSS token pairs and
+computes WCAG ratios from them — it never samples a pixel, so a `box-shadow`
+is invisible to it. The requirement was satisfied before I wrote a line.
+
+**What I found while checking:** none of the seven tube colours
+(`--c-play`, `--c-next`, …) appear in that gate's `PAIRS` list, so the colour
+of every transport icon was ungated. Measured, they are fine — 4.39:1 at worst
+in Jukebox, 7.24:1 in Night, against the button face. Nothing was broken. But
+nothing was watching either.
+
+**Chosen:** added a second gate for them at **3:1**, not 4.5:1 — icons are
+non-text graphics, so WCAG 1.4.11 is the applicable rule, and holding them to
+the text bar would be wrong in the other direction. And the halo is a shadow
+only: it never tints the button face, which is what keeps that measurement
+describing what is actually on screen. There is a mutation check for each.
+
+**Halo design:** colour comes from `--btn`, which every `.tbtn` already sets
+for its own glyph, so the glow cannot drift out of step with the icon it
+surrounds. Subtle at rest, brighter on hover, brightest when latched on or
+pressed; disabled buttons do not glow. In Jukebox that is seven distinct hues;
+the Night Dial palette collapses them to one amber, which is that theme's
+character and correct there.
+
+**Scope:** the eight `.tbtn` controls only, not the flank buttons (favourite,
+jump, source filter). "Transport buttons" most naturally means the transport
+row itself, and haloing the small square jump cells would read as a defect.
+
+**If `color-mix` is unavailable** `--halo` is invalid at computed-value time
+and `box-shadow` falls back to `none` — the buttons lose the glow and nothing
+else moves.
+
+**Reverse:** the neon-halo block in `app.css`, `tests/halo.spec.js`, and the
+second gate at the end of `tests/contrast.spec.js`.
+
+---
+
+## 2026-09-04 — A focus ring that was really Chrome's
+
+**Unclear:** nothing. Recording it because it is the same failure mode for the
+ninth time, and this one was subtle.
+
+The halo occupies `box-shadow`, so the focus ring has to be an `outline` or
+the two fight over one property. I added the outline and a test asserting
+`outline-style !== "none"` and `outline-width >= 2`. Deleting my rule entirely
+left the test green: Chrome draws its own `:focus-visible` ring, which computes
+to `outline-style: auto` and is wide enough to clear that bar. I was measuring
+the browser, not the stylesheet.
+
+The test now names the rule — `outline-style: solid`, a 2px offset, and the
+colour equal to `--ink` — and asserts `:focus-visible` actually matched, so it
+cannot silently measure nothing.
+
+**Reverse:** n/a.
+
+---
+
 ## 2026-09-04 — Milestone 6: the scrubber pins with the stage
 
 **Unclear:** QoL 10 says scrolling "pins the stage so it never scrolls past the

@@ -46,10 +46,6 @@ PY
 
 print "mutation checks (each should be CAUGHT)"
 
-mut "#tTop ignores the sticky chrome above the list" app.js \
-  'getBoundingClientRect().top - stickyOffset();' \
-  'getBoundingClientRect().top;' \
-  tests/transport.spec.js "jumps to the top"
 
 mut "positionOf always returns 0" app.js \
   '    const viewIdx = state.view.findIndex((t) => t.k === track.k);
@@ -138,10 +134,10 @@ mut 'closing the panel leaves the picker open behind it' app.js \
 # ---------------------------------------------------------- milestone 6
 
 mut 'the stage and scrubber are not pinned' app.css \
-  '.pinned {
-  position: sticky;' \
-  '.pinned {
-  position: static;' \
+  '  position: sticky;
+  top: var(--topbar-h);' \
+  '  position: static;
+  top: var(--topbar-h);' \
   tests/stage.spec.js 'never scrolls past the top bar'
 
 mut 'the stage never collapses' app.js \
@@ -154,12 +150,6 @@ mut 'the anti-flap guard is removed' app.js \
   '    void room;' \
   tests/stage.spec.js 'too little scroll room never collapses'
 
-mut 'jump-to-top ignores the pinned stage' app.js \
-  '    const pinned = document.querySelector(".pinned");
-    if (!pinned || getComputedStyle(pinned).position !== "sticky") return bar;
-    return bar + pinned.getBoundingClientRect().height;' \
-  '    return bar;' \
-  tests/stage.spec.js 'clears the pinned stage'
 
 mut 'the collapsed stage loses its bottom padding' app.css \
   '.stage.is-collapsed {
@@ -174,6 +164,56 @@ mut 'the collapsed side column stays stacked' app.css \
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);' \
   '  grid-template-rows: 2fr 1fr;' \
   tests/stage.spec.js 'left of the spectrum'
+
+# ---------------------------------------------------------- milestone 7
+
+mut 'the halo uses one shared accent, not each tube colour' app.css \
+  '  --halo: color-mix(in srgb, var(--btn, var(--accent)) 55%, transparent);' \
+  '  --halo: color-mix(in srgb, var(--accent) 55%, transparent);' \
+  tests/halo.spec.js 'own tube colour .jukebox'
+
+mut 'a disabled button still glows' app.css \
+  '.tbtn[disabled] { box-shadow: none; }' \
+  '.tbtn[disabled] { opacity: .35; }' \
+  tests/halo.spec.js 'disabled button does not glow'
+
+mut 'the halo does not respond to hover' app.css \
+  '.tbtn:hover {
+  box-shadow: 0 0 17px -2px var(--halo), inset 0 0 11px -5px var(--halo);
+}' \
+  '.tbtn:hover { box-shadow: 0 0 10px -3px var(--halo); }' \
+  tests/halo.spec.js 'brightens on hover'
+
+mut 'the halo tints the button face' app.css \
+  '.tbtn {
+  --halo: color-mix(in srgb, var(--btn, var(--accent)) 55%, transparent);' \
+  '.tbtn {
+  background: color-mix(in srgb, var(--btn, var(--accent)) 12%, var(--raised));
+  --halo: color-mix(in srgb, var(--btn, var(--accent)) 55%, transparent);' \
+  tests/halo.spec.js 'never tints the button face'
+
+mut 'the focus ring is drawn as a shadow the halo can swallow' app.css \
+  '.tbtn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}' \
+  '.tbtn:focus-visible { box-shadow: 0 0 0 2px var(--ink); }' \
+  tests/halo.spec.js 'focus ring survives'
+
+mut 'a tube colour drops below the 3:1 graphics bar' app.css \
+  '  --c-next:      #fa1768;' \
+  '  --c-next:      #3a2a20;' \
+  tests/contrast.spec.js 'legible on the button face'
+
+mut 'jump-to-top lands short of the top' app.js \
+  '    window.scrollTo({ top: 0, behavior: "smooth" });' \
+  '    window.scrollTo({ top: 400, behavior: "smooth" });' \
+  tests/stage.spec.js 'clears the pinned stage'
+
+mut 'jump-to-top leaves the list behind the chrome' app.js \
+  '    window.scrollTo({ top: 0, behavior: "smooth" });' \
+  '    window.scrollTo({ top: 400, behavior: "smooth" });' \
+  tests/transport.spec.js 'jumps to the top'
 
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

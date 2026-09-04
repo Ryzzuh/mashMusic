@@ -667,7 +667,8 @@ main {
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition: transform .12s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+  transition: transform .12s var(--ease), border-color .15s var(--ease),
+              background .15s var(--ease), box-shadow .18s var(--ease);
 }
 .tbtn svg {
   width: 21px; height: 21px;
@@ -682,6 +683,40 @@ main {
   border-color: var(--check);
 }
 .tbtn[disabled] { opacity: .35; cursor: not-allowed; transform: none; }
+
+/* ------------------------------------------------ neon halo (Jukebox 11)
+ *
+ * Each button glows in its own tube colour — the seven Jukebox hues, or the
+ * single amber the Night Dial palette collapses them to. The colour comes
+ * from --btn, which every .tbtn already sets for its icon, so the halo cannot
+ * drift out of step with the glyph it surrounds.
+ *
+ * The glow is a box-shadow only. It never tints the button face, so the icon
+ * keeps its measured contrast against --raised: 4.39:1 at worst in Jukebox,
+ * 7.24:1 in Night, both clear of WCAG 1.4.11's 3:1 for non-text graphics.
+ *
+ * If color-mix is unavailable, --halo is invalid at computed-value time and
+ * box-shadow falls back to none. The buttons lose the glow and nothing else. */
+.tbtn {
+  --halo: color-mix(in srgb, var(--btn, var(--accent)) 55%, transparent);
+  box-shadow: 0 0 10px -3px var(--halo), inset 0 0 7px -4px var(--halo);
+}
+.tbtn:hover {
+  box-shadow: 0 0 17px -2px var(--halo), inset 0 0 11px -5px var(--halo);
+}
+.tbtn:active,
+.tbtn[aria-pressed="true"] {
+  box-shadow: 0 0 23px -1px var(--halo), inset 0 0 13px -5px var(--halo);
+}
+/* a dead tube does not glow */
+.tbtn[disabled] { box-shadow: none; }
+
+/* The halo is a shadow, and so is many a focus ring — keep the ring drawn as
+   an outline so the glow cannot swallow it. */
+.tbtn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
 
 .t-prev   { --btn: var(--c-prev); }
 .t-play   { --btn: var(--c-play); }

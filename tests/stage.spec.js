@@ -147,15 +147,20 @@ test("jump-to-top clears the pinned stage, not just the top bar", async ({ page 
   await page.evaluate(() => window.scrollTo(0, 6000));
   await settle(page);
   await page.click("#tTop");
-  await page.waitForTimeout(1000);
 
-  const g = await page.evaluate(() => {
-    const first = document.querySelector(".trow").getBoundingClientRect();
-    const pinned = document.querySelector(".pinned").getBoundingClientRect();
-    return { firstRowTop: first.top, pinnedBottom: pinned.bottom };
-  });
-  // the first row must clear the whole pinned block, not sit behind it
-  expect(g.firstRowTop).toBeGreaterThanOrEqual(g.pinnedBottom - 2);
+  /* Poll the claim itself until it rests. Two fixed waits were wrong here for
+   * two different reasons: 1000ms sampled the smooth scroll mid-flight at
+   * y=18, and waiting only for the scroll position to stop still caught the
+   * 300ms expand that fires once it reaches 0. The claim is about where the
+   * list comes to rest, so wait for exactly that. */
+  await expect.poll(async () => {
+    const g = await page.evaluate(() => {
+      const first = document.querySelector(".trow").getBoundingClientRect();
+      const pinned = document.querySelector(".pinned").getBoundingClientRect();
+      return { firstRowTop: first.top, pinnedBottom: pinned.bottom };
+    });
+    return g.firstRowTop >= g.pinnedBottom - 2;
+  }, { timeout: 8000, message: "the first row never cleared the pinned block" }).toBe(true);
 });
 
 test("the stage does not pin on a narrow viewport", async ({ page }) => {

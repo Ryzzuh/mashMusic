@@ -517,10 +517,16 @@
   $("tJump").addEventListener("click", jumpToCurrent);
   $("tJump").disabled = true;
   $("tTop").addEventListener("click", () => {
-    // the topbar and the collapsed stage are both sticky, so scrolling the
-    // list to y=0 hides its first rows behind them
-    const y = window.scrollY + $("tracklist").getBoundingClientRect().top - stickyOffset();
-    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+    /* The document top, not a computed offset. Offsetting by the sticky chrome
+     * is circular here: the tracklist's document position depends on the
+     * pinned block's flow height, which depends on whether the stage is
+     * collapsed, which depends on the very scroll position being computed.
+     * That resolved to 0 on one run and came to rest 73px short on another,
+     * permanently, with the first rows behind the pinned block.
+     *
+     * At y=0 the stage is expanded by definition and the list starts directly
+     * below it, which is what "top of the list" should mean anyway. */
+    window.scrollTo({ top: 0, behavior: "smooth" });
   });
   $("tBottom").addEventListener("click", () => {
     bulkRender = true;                       // one repaint, not one per chunk
@@ -1542,15 +1548,6 @@
   window.addEventListener("scroll", updateStageCollapse, { passive: true });
   window.addEventListener("resize", updateStageCollapse);
   updateStageCollapse();
-
-  /* Anything scrolling something to "just below the chrome" has to clear the
-   * sticky stage as well as the sticky bar, or it lands underneath it. */
-  function stickyOffset() {
-    const bar = document.querySelector(".topbar").getBoundingClientRect().height;
-    const pinned = document.querySelector(".pinned");
-    if (!pinned || getComputedStyle(pinned).position !== "sticky") return bar;
-    return bar + pinned.getBoundingClientRect().height;
-  }
 
   /* ------------------------------------------ topbar overflow (QoL 2)
    *
