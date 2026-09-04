@@ -517,9 +517,9 @@
   $("tJump").addEventListener("click", jumpToCurrent);
   $("tJump").disabled = true;
   $("tTop").addEventListener("click", () => {
-    // the topbar is sticky, so scrolling the list to y=0 hides its first rows
-    const bar = document.querySelector(".topbar").getBoundingClientRect().height;
-    const y = window.scrollY + $("tracklist").getBoundingClientRect().top - bar;
+    // the topbar and the collapsed stage are both sticky, so scrolling the
+    // list to y=0 hides its first rows behind them
+    const y = window.scrollY + $("tracklist").getBoundingClientRect().top - stickyOffset();
     window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
   });
   $("tBottom").addEventListener("click", () => {
@@ -1509,6 +1509,48 @@
       store.write(K_PREF, prefs);
     });
   });
+
+  /* --------------------------------------- collapsing stage (QoL 10)
+   *
+   * The stage is sticky under the top bar. Once the list is scrolled, the
+   * video column closes and the now-playing text sits beside the artwork and
+   * spectrum, so the pinned strip stays short enough to leave the list usable.
+   *
+   * Wide hysteresis (collapse above 40, expand at or below 4) because
+   * collapsing shortens the document by ~225px: a narrow band would let that
+   * shortening push the scroll position back across the threshold and flap. */
+  const stageEl = document.querySelector(".stage");
+  let stageCollapsed = false;
+
+  function stageHeights() {
+    const doc = document.documentElement;
+    return { room: doc.scrollHeight - window.innerHeight, y: window.scrollY };
+  }
+
+  function updateStageCollapse() {
+    const { room, y } = stageHeights();
+    const want = stageCollapsed ? y > 4 : y > 40;
+    // With a short list — one search result, say — there may not be enough
+    // document left to stay past the threshold once the stage shrinks, and
+    // the two states would alternate on every scroll event.
+    if (want && !stageCollapsed && room < 260) return;
+    if (want === stageCollapsed) return;
+    stageCollapsed = want;
+    stageEl.classList.toggle("is-collapsed", want);
+  }
+
+  window.addEventListener("scroll", updateStageCollapse, { passive: true });
+  window.addEventListener("resize", updateStageCollapse);
+  updateStageCollapse();
+
+  /* Anything scrolling something to "just below the chrome" has to clear the
+   * sticky stage as well as the sticky bar, or it lands underneath it. */
+  function stickyOffset() {
+    const bar = document.querySelector(".topbar").getBoundingClientRect().height;
+    const pinned = document.querySelector(".pinned");
+    if (!pinned || getComputedStyle(pinned).position !== "sticky") return bar;
+    return bar + pinned.getBoundingClientRect().height;
+  }
 
   /* ------------------------------------------ topbar overflow (QoL 2)
    *

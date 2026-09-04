@@ -6,6 +6,63 @@ to undo it.
 
 ---
 
+## 2026-09-04 — Milestone 6: the scrubber pins with the stage
+
+**Unclear:** QoL 10 says scrolling "pins the stage so it never scrolls past the
+top of the artwork and spectrum, preserving the same gap that runs from the
+artwork's bottom to the scrubber." Pinning the stage alone satisfies the first
+half and makes the second half meaningless — the scrubber scrolls away, and
+the gap is to something no longer on screen.
+
+**Chosen:** the stage and the scrubber pin together, in one sticky wrapper
+(`.pinned`). The gap is then preserved by construction: it is still just the
+stage's bottom padding and the scrubber's top padding in ordinary flow, and it
+measures 33px in both states without anything recomputing it.
+
+**Why:** it is the reading that makes the sentence coherent, and it is better
+behaviour — you can see what is playing *and* seek it while browsing 1,257
+rows. The alternative, recomputing a 33px offset in JS against a collapsed
+height, is a constant that would drift the first time the strip is restyled.
+
+**Collapse threshold:** above 40px of scroll, expanding again at or below 4px.
+The wide band is not arbitrary — see below.
+
+**Reverse:** remove `.pinned` from `index.html` (unwrap the two sections), the
+collapsing-stage blocks in `app.css` and `app.js`, and `tests/stage.spec.js`.
+
+---
+
+## 2026-09-04 — The anti-flap guard is real, and three tests failed to prove it
+
+**Unclear:** whether `updateStageCollapse`'s `room < 260` guard was defending
+against anything, or was the same kind of dead defensive code the milestone-5
+review told me to stop writing.
+
+**What happened:** the mutation check said MISSED three times running, and each
+time the cause was different and in my test, not the code.
+
+1. The first version filtered the list to three rows. That is not scrollable at
+   all, so `scrollY` never left 0 and the guard was never reached.
+2. Six favourites put the document in the right zone (204px of scroll room,
+   past the 40px threshold but less than the ~225px the collapse removes), but
+   the test asserted the end state — which is `collapsed: false` either way,
+   because the flap *resolves* to expanded. So I counted class changes instead.
+3. The counter still read 0, because the collapse animates over 300ms and my
+   settle helper waited two frames. Unguarded, the sequence is `collapsed:true`
+   at +30ms and `collapsed:false` at ~+400ms. I was sampling in between.
+
+**Chosen:** keep the guard. It prevents a genuine visible flicker, now proven:
+with it, zero class changes; without it, two.
+
+**Also fixed:** `tools/mutate.sh` reported MISSED when its `-g` pattern matched
+no test at all, which is what happened after I renamed one. An empty selection
+is a broken check, not a passing one — it now reports BROKEN and fails the run.
+That hole cost me a debugging pass looking for a defect in the code.
+
+**Reverse:** the guard is one line in `updateStageCollapse`.
+
+---
+
 ## 2026-09-04 — Every layout test has been measuring the wrong fonts
 
 **Unclear:** nothing was unclear. This is a defect in the suite that milestone

@@ -83,15 +83,22 @@ test("the tab jumps to the top and to the bottom of the list", async ({ page }) 
 
   await page.click("#tTop");
   await page.waitForTimeout(900);
-  // The topbar is sticky, so landing the list at y=0 buries its first rows.
-  // Asserting |listTop| < 30 was satisfied by exactly that bug.
-  const geo = await page.evaluate(() => ({
-    listTop: document.querySelector("#tracklist").getBoundingClientRect().top,
-    barBottom: document.querySelector(".topbar").getBoundingClientRect().bottom,
-    firstRowTop: document.querySelector(".trow").getBoundingClientRect().top,
-  }));
-  expect(Math.abs(geo.listTop - geo.barBottom)).toBeLessThan(6);
-  expect(geo.firstRowTop).toBeGreaterThanOrEqual(geo.barBottom - 1);
+  /* Landing the list at y=0 buries its first rows behind the sticky chrome.
+   * Asserting |listTop| < 30 was satisfied by exactly that bug. The chrome is
+   * the top bar plus, since QoL 10, the pinned stage and scrubber — so the
+   * target is the bottom of whatever is actually pinned above the list. */
+  const geo = await page.evaluate(() => {
+    const pinned = document.querySelector(".pinned");
+    const sticky = getComputedStyle(pinned).position === "sticky";
+    return {
+      listTop: document.querySelector("#tracklist").getBoundingClientRect().top,
+      chromeBottom: (sticky ? pinned : document.querySelector(".topbar"))
+        .getBoundingClientRect().bottom,
+      firstRowTop: document.querySelector(".trow").getBoundingClientRect().top,
+    };
+  });
+  expect(Math.abs(geo.listTop - geo.chromeBottom)).toBeLessThan(6);
+  expect(geo.firstRowTop).toBeGreaterThanOrEqual(geo.chromeBottom - 1);
 });
 
 test("the source switch filters the list", async ({ page }) => {

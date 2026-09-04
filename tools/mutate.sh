@@ -28,6 +28,14 @@ PY
   local res
   res=$(npx playwright test "$spec" -g "$grepfor" 2>&1 | grep -E '^\s+[0-9]+ (passed|failed)' | tr -d '\n')
   mv "$file.bak" "$file"
+  # An empty result means the -g pattern matched no test at all — usually a
+  # renamed test. That is a broken check, not a passing one, and reporting it
+  # as MISSED sent me looking for a bug in the code instead of in this file.
+  if [[ -z "$res" ]]; then
+    print -- "  BROKEN   $name   <-- no test matches \"$grepfor\" in $spec"
+    fails=$((fails + 1))
+    return
+  fi
   if [[ "$res" == *failed* ]]; then
     print -- "  CAUGHT   $name"
   else
@@ -38,9 +46,9 @@ PY
 
 print "mutation checks (each should be CAUGHT)"
 
-mut "#tTop ignores the sticky topbar height" app.js \
-  'const y = window.scrollY + $("tracklist").getBoundingClientRect().top - bar;' \
-  'const y = window.scrollY + $("tracklist").getBoundingClientRect().top;' \
+mut "#tTop ignores the sticky chrome above the list" app.js \
+  'getBoundingClientRect().top - stickyOffset();' \
+  'getBoundingClientRect().top;' \
   tests/transport.spec.js "jumps to the top"
 
 mut "positionOf always returns 0" app.js \
@@ -126,6 +134,46 @@ mut 'closing the panel leaves the picker open behind it' app.js \
   '    if (!open) openListMenu(false);' \
   '    void open;' \
   tests/topbar.spec.js 'strand the picker'
+
+# ---------------------------------------------------------- milestone 6
+
+mut 'the stage and scrubber are not pinned' app.css \
+  '.pinned {
+  position: sticky;' \
+  '.pinned {
+  position: static;' \
+  tests/stage.spec.js 'never scrolls past the top bar'
+
+mut 'the stage never collapses' app.js \
+  '    const want = stageCollapsed ? y > 4 : y > 40;' \
+  '    const want = false && y;' \
+  tests/stage.spec.js 'collapses when the list is scrolled'
+
+mut 'the anti-flap guard is removed' app.js \
+  '    if (want && !stageCollapsed && room < 260) return;' \
+  '    void room;' \
+  tests/stage.spec.js 'too little scroll room never collapses'
+
+mut 'jump-to-top ignores the pinned stage' app.js \
+  '    const pinned = document.querySelector(".pinned");
+    if (!pinned || getComputedStyle(pinned).position !== "sticky") return bar;
+    return bar + pinned.getBoundingClientRect().height;' \
+  '    return bar;' \
+  tests/stage.spec.js 'clears the pinned stage'
+
+mut 'the collapsed stage loses its bottom padding' app.css \
+  '.stage.is-collapsed {
+  grid-template-columns: 0fr minmax(0, 1fr);' \
+  '.stage.is-collapsed {
+  padding-bottom: 8px;
+  grid-template-columns: 0fr minmax(0, 1fr);' \
+  tests/stage.spec.js 'gap from the artwork to the scrubber'
+
+mut 'the collapsed side column stays stacked' app.css \
+  '  grid-template-rows: none;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);' \
+  '  grid-template-rows: 2fr 1fr;' \
+  tests/stage.spec.js 'left of the spectrum'
 
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

@@ -95,6 +95,10 @@
 
 <main>
 
+  <!-- QoL 10: the stage and the scrubber pin together. Keeping them in one
+       sticky wrapper is what preserves the gap from the artwork's bottom to
+       the scrubber through the collapse — it stays ordinary flow spacing. -->
+  <div class="pinned">
   <section class="stage" aria-label="Now playing">
     <div class="stage-media">
       <div class="media-slot" id="slotYT" hidden><div id="ytPlayer"></div></div>
@@ -181,6 +185,7 @@
       </dl>
     </div>
   </section>
+  </div><!-- /.pinned -->
 
   <section class="listing" aria-label="Tracks">
     <ol class="tracklist" id="tracklist"></ol>

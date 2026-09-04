@@ -1277,3 +1277,70 @@ main {
   .brand-mark.alt { display: none; }   /* "mash" alone still reads as the mark */
   .search { min-width: 96px; }
 }
+
+
+/* --------------------------------------------- collapsing stage (QoL 10) */
+
+/* The stage and the scrubber pin as one unit under the top bar, so what is
+ * playing — and the ability to seek it — stay on screen while the list
+ * scrolls. Wrapping them also means the 33px from the artwork's bottom to the
+ * scrubber is preserved through the collapse for free: it is still just the
+ * stage's bottom padding and the scrubber's top padding, in normal flow. */
+.pinned {
+  /* The transport is in here too. It sits above the tracklist in flow, so
+     pinning the stage over it would have put the play, next and jump controls
+     behind the stage the moment the list scrolled — and milestone 4 aligned
+     its flanks to the tracklist's own columns, which only reads correctly
+     while the two are adjacent. */
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 20;
+}
+
+/* fr values interpolate, so the video column can be animated shut. The row/
+ * column flip inside .stage-side is not animatable and switches at the same
+ * moment; the eye reads the video closing as the whole motion. */
+.stage {
+  transition: grid-template-columns .3s var(--ease), gap .3s var(--ease);
+}
+.stage-media { min-width: 0; overflow: hidden; }
+
+.stage.is-collapsed {
+  grid-template-columns: 0fr minmax(0, 1fr);
+  gap: 22px 0;
+}
+.stage.is-collapsed .stage-media {
+  /* not display:none — a zero-width flex/grid child still animates, and the
+     YouTube iframe must not be torn out of the document mid-playback */
+  opacity: 0;
+  pointer-events: none;
+}
+.stage.is-collapsed .stage-side {
+  height: auto;
+  min-height: 0;
+  grid-template-rows: none;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  align-items: center;
+  gap: 0 33px;
+}
+/* Shorter than the 106px it has expanded: the pinned block also carries the
+   scrubber and the transport, and every pixel here is a pixel of tracklist.
+   The 33px from the artwork's bottom to the scrubber is unaffected — it is the
+   stage's bottom padding plus the scrubber's, not anything derived from this. */
+.stage.is-collapsed .stage-strip { height: 72px; }
+.stage.is-collapsed .stage-meta { justify-content: center; gap: 4px; }
+.stage.is-collapsed .np-sub,
+.stage.is-collapsed .np-flags { display: none; }
+.stage.is-collapsed .np-title { font-size: 21px; }
+
+@media (max-width: 860px) {
+  /* single column already; collapsing here would leave almost nothing, and a
+     pinned stage on a short viewport eats the list */
+  .pinned { position: static; }
+  .stage.is-collapsed { grid-template-columns: 1fr; gap: 16px; }
+  .stage.is-collapsed .stage-media { display: none; }
+}
+
+/* No reduced-motion block here: the global rule near .statusbar already caps
+   every transition-duration at .01ms !important, and that wins over a local
+   `transition: none` anyway. */
