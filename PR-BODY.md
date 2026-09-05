@@ -1,4 +1,4 @@
-# Overnight spec run: test harness, and milestones 1–4
+# Overnight spec run: test harness, and milestones 1–9
 
 Built unattended overnight against the feature dump. `main` was never committed
 to — it is still at `537acf6`, so the live Pages site has served the same build
