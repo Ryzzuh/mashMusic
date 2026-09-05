@@ -6,6 +6,81 @@ to undo it.
 
 ---
 
+## 2026-09-05 — Milestone 9: the library half works, the YouTube half is unrun
+
+**What is done:** a dead row grows a swap control that opens a dialog of
+candidates. The library search — normalised Levenshtein over titles, scored
+against every live track — covers **both** sources and needs no network. It
+finds the real twins: the library holds 13 exactly-duplicated titles across 26
+tracks, so a dead entry often has a working copy sitting a few hundred rows
+away.
+
+**What is not done, and cannot be by me:** the YouTube fallback needs a Data
+API key, which cannot ship in a static page. `tools/find-replacements.mjs` is
+written and follows the `check-liveness.mjs` pattern, but **I have no key, so
+I have never run it and `data/replacements.json` does not exist.** The app
+merges that file when present and says so in the dialog when it is not. The
+sidecar path is tested against a stubbed response, not a real one.
+
+Worth knowing before you run it: `search.list` bills **100 quota units per
+call** against a 10,000/day default. That is 100 dead tracks per day, not
+10,000. The script only looks at tracks already known dead, skips ones it has
+already solved, stops at `--limit`, and bails out on a quota error.
+
+**SoundCloud gets the library half only**, as the plan said — its public API
+has been closed to new registrations since 2019, so there is nothing to call.
+The dialog says that rather than silently offering less.
+
+**Correcting the plan:** it claimed three copies of "Ben Pearce - What I Might
+Do". There are two.
+
+**Reverse:** the replacement block in `app.js`, `#swapModal` in `index.html`,
+the styles at the end of `app.css`, and `tests/replace.spec.js`.
+
+---
+
+## 2026-09-05 — A row rendered after playback started never marked itself
+
+Found by a milestone-9 test, but the bug is older and wider.
+
+`markCurrentRow()` only reaches rows that already exist. Play a track from
+beyond the 60-row render window — through the wheel, or now a replacement
+chosen for a dead track — and the list showed nothing highlighted, even after
+scrolling down to the row. `buildRow()` now marks itself when it builds the
+current track's row.
+
+**Why it survived this long:** autoplay renders up to the target row *before*
+calling `play()`, so the common path always had a row to mark.
+
+---
+
+## 2026-09-05 — Two performance claims I had to walk back
+
+I measured the replacement search at 1,836ms through Playwright and treated it
+as a UI problem. Measured in-page, the search is **54–126ms cold, 53–89ms
+warm**; the rest was harness round-trip.
+
+I then added length pruning and a bounded Levenshtein. Measured honestly, that
+takes the worst case from 184ms to 126ms — around 1.5x, not the order of
+magnitude the first number implied. Both are fine for a click. I kept the
+pruning because it is small and the direction is right, but the justification
+in the commit message is the real 1.5x, not the phantom 15x.
+
+---
+
+## 2026-09-05 — One mutation check was unfalsifiable, so it is gone
+
+The swap button calls `stopPropagation` so the click is not also a request to
+play the dead row. I wrote a mutation removing it and the suite stayed green —
+correctly, because `play()` opens with `if (isDead(track)) return;`. With two
+guards, removing one proves nothing.
+
+I kept the `stopPropagation` (it is the right semantic, and the row click may
+grow behaviour later) and deleted the check rather than leave one that reports
+CAUGHT for a reason unrelated to what it names.
+
+---
+
 ## 2026-09-05 — The collapsing stage turned every fixed sleep into a race
 
 **What happened:** after milestone 8 the suite started failing intermittently,
@@ -28,6 +103,40 @@ not move the view" scrolled to 400, read the position, clicked Next, and found
 shortened the document by ~258px over 300ms and clamped the position. The test
 was blaming the next track for a move it had caused itself. It now lets the
 layout settle before it takes its baseline.
+
+---
+
+## 2026-09-05 — CORRECTION: the 73px was real, and it was scroll anchoring
+
+The entry below concluded that jump-to-top resting short of the document top
+was an artefact of my own machine load. **That was wrong**, and the error was
+mine twice over.
+
+It reappeared on a quiet run. Two different `#tTop` implementations had both
+come to rest at exactly 73px, which is far too stable for a starved animation —
+that should have told me it was something scrolling *down* after the jump, not
+a scroll failing to finish.
+
+It is **scroll anchoring**. Chrome compensates when content above the viewport
+changes size, and QoL 10 makes the stage grow by ~258px precisely as the scroll
+approaches the top. Measured, unambiguously:
+
+    default anchoring   ... 443  73  73  73  73     (rests short)
+    overflow-anchor:none ... 815   0   0   0   0     (rests at 0)
+
+Fixed with `overflow-anchor: none` on `html`. The tracklist only ever appends
+rows *below* the viewport, so anchoring was doing nothing useful here.
+
+**I had this hypothesis first and dismissed it on a broken probe.** My test
+removed the `is-collapsed` class from a stage that was already expanded, so it
+measured nothing and returned a delta of 0, and I took that as evidence
+against. A probe that cannot fail is worth exactly as much as a test that
+cannot fail — the lesson this whole branch keeps teaching.
+
+What stands from the entry below: the machine really was at load average 209,
+that really did make several tests fail spuriously, and running suites
+concurrently really was a mistake. What does not stand is the conclusion I drew
+about this particular defect.
 
 ---
 

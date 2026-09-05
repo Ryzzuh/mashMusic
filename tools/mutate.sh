@@ -253,5 +253,41 @@ mut 'reset clears the view but not the store' app.js \
   '    played.clear();' \
   tests/decay.spec.js 'brings it back'
 
+# ---------------------------------------------------------- milestone 9
+
+mut 'every row offers a replacement, not just dead ones' app.js \
+  '    if (swap) swap.hidden = !dead;' \
+  '    if (swap) swap.hidden = false;' \
+  tests/replace.spec.js 'only a dead row offers'
+
+mut 'dead tracks are offered as replacements' app.js \
+  '      if (t.k === track.k || isDead(t)) continue;' \
+  '      if (t.k === track.k) continue;' \
+  tests/replace.spec.js 'dead twin is not offered'
+
+mut 'the similarity threshold is abandoned' app.js \
+  '  const SWAP_MIN = 0.62;          // below this the "matches" are noise' \
+  '  const SWAP_MIN = 0;' \
+  tests/replace.spec.js 'unrelated titles are not offered'
+
+
+mut 'the offline sidecar is fetched but discarded' app.js \
+  '        if (!replacements[k] && Array.isArray(list)) { replacements[k] = list; added++; }' \
+  '        void list; void k;' \
+  tests/replace.spec.js 'offline sidecar is merged'
+
+mut 'a late-rendered row does not mark itself current' app.js \
+  '    if (state.current && state.current.k === track.k) {
+      li.setAttribute("aria-current", "true");
+      revealRow(li, track);
+    }' \
+  '    void track;' \
+  tests/replace.spec.js 'choosing a replacement plays it'
+
+mut 'scroll anchoring is left on' app.css \
+  'html { height: 100%; overflow-anchor: none; }' \
+  'html { height: 100%; }' \
+  tests/stage.spec.js 'scroll anchoring does not drag'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

@@ -112,7 +112,14 @@ html[data-skin="night"] {
 
 * { box-sizing: border-box; }
 
-html { height: 100%; }
+/* Scroll anchoring off, deliberately. The pinned stage changes height as a
+   consequence of scrolling (QoL 10), and anchoring exists to compensate for
+   content above the viewport changing size — so it fights that expansion and
+   leaves a scroll-to-top resting 73px short, with the first rows behind the
+   pinned block. Measured: default anchoring settles at 73, `none` settles at 0.
+   The tracklist only ever appends rows below the viewport, so there is nothing
+   here that anchoring was helping. */
+html { height: 100%; overflow-anchor: none; }
 body { min-height: 100%; }
 
 body {
@@ -1410,3 +1417,84 @@ main {
 }
 .stat-reset:hover { color: var(--ink); border-color: var(--accent); }
 .stat-reset[hidden] { display: none; }
+
+
+/* --------------------------------------- replacement search (QoL 1) */
+
+/* shares the last grid cell with the duration, so a live row gains no gap */
+.t-tail { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+
+.t-swap {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-hard);
+  border-radius: var(--r);
+  background: var(--sunk);
+  color: var(--accent);
+  cursor: pointer;
+}
+.t-swap[hidden] { display: none; }
+.t-swap svg {
+  width: 15px; height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.t-swap:hover { border-color: var(--accent); background: var(--raised); }
+/* the row is line-through and dimmed; its one live control must not be */
+.trow.is-dead .t-swap { opacity: 1; cursor: pointer; }
+
+.swap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.swap-pick {
+  appearance: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name score" "via score";
+  align-items: center;
+  gap: 0 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.swap-pick:hover { background: var(--sunk); }
+.swap-name { grid-area: name; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swap-via {
+  grid-area: via;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.swap-score {
+  grid-area: score;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.swap-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.swap-note:empty { display: none; }

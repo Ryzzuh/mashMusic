@@ -205,3 +205,30 @@ test("reduced motion drops the collapse transition", async ({ page }) => {
       .transitionDuration.split(",").map((v) => parseFloat(v)));
   expect(Math.max(...normal)).toBeGreaterThan(0.1);
 });
+
+
+test("scroll anchoring does not drag the jump-to-top back", async ({ page }) => {
+  /* The stage grows by ~258px as the scroll nears the top, and scroll
+   * anchoring exists to compensate for exactly that — content above the
+   * viewport changing size. Left on, it settles the page 73px short with the
+   * first rows behind the pinned block. Measured: 73 with anchoring, 0 without.
+   *
+   * The full list has to be rendered and fully scrolled first; a short scroll
+   * does not give anchoring enough to work with. */
+  test.setTimeout(90_000);
+
+  await page.click("#tBottom");
+  await page.waitForFunction(() => document.querySelectorAll(".trow").length === 1257,
+    null, { timeout: 30_000 });
+  await page.waitForTimeout(1200);
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(1000);
+
+  await page.click("#tTop");
+  await expect.poll(() => page.evaluate(() => Math.round(window.scrollY)),
+    { timeout: 20_000, message: "the page never came to rest at the document top" })
+    .toBe(0);
+
+  // and having landed, it must stay there rather than being nudged back
+  await page.waitForTimeout(800);
+  expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(0);
+});

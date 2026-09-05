@@ -35,6 +35,7 @@
   const K_WHEEL = "mash.wheel.v1";
   const K_SRC  = "mash.sources.v1";
   const K_PLAYED = "mash.played.v1";
+  const K_SWAP = "mash.replacements.v1";
 
   /* Liveness: { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch> } }
    * Seeded at runtime from the players' own error events. An offline batch
@@ -49,6 +50,12 @@
    * reload is pointless. Only the players' own end events write to this — a
    * skip is not a listen. */
   const played = new Set(store.read(K_PLAYED, []));
+
+  /* QoL 1: suggestions for tracks the platforms have lost. The library half is
+   * computed here; the YouTube half is a precomputed sidecar, because a search
+   * API key cannot ship in a static page. SoundCloud gets the library half
+   * only — its public API has been closed to new keys since 2019. */
+  const replacements = store.read(K_SWAP, {});
 
   /* Which contributors are in play. Everyone is selected by default, so the
    * predicate in buildView() is a no-op until something is deselected. Names
@@ -82,6 +89,110 @@
   };
 
   const isSkippable = (t) => isDead(t) || liveness[t.k]?.s === "stalled";
+
+  /* ------------------------------------------- replacement search (QoL 1) */
+
+  const normalise = (str) => str.toLowerCase()
+    .replace(/[\u2018\u2019']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  /* Trailing qualifiers are the common difference between a track and its twin
+   * — "(Original Mix)", "[Exploited]", "(Official Video)". Comparing with and
+   * without them and keeping the better score finds pairs that a single form
+   * misses in either direction. */
+  const coreOf = (str) => normalise(str.replace(/[([][^)\]]*[)\]]/g, " "));
+
+  const SWAP_MIN = 0.62;          // below this the "matches" are noise
+  const SWAP_MAX = 6;
+
+  /* Bounded: give up as soon as every cell in a row exceeds `max`, because the
+   * distance can only grow from there. Scanning 1,257 titles unbounded took
+   * 1.8s on a click, which is not an interaction. */
+  function levenshtein(a, b, max) {
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    let prev = new Array(b.length + 1);
+    const cur = new Array(b.length + 1);
+    for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      cur[0] = i;
+      let best = cur[0];
+      for (let j = 1; j <= b.length; j++) {
+        const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+        const v = Math.min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+        cur[j] = v;
+        if (v < best) best = v;
+      }
+      if (best > max) return max + 1;
+      for (let j = 0; j <= b.length; j++) prev[j] = cur[j];
+    }
+    return prev[b.length];
+  }
+
+  /* Levenshtein is at least the difference in length, so a pair too different
+   * in length to clear the threshold is rejected without any matrix at all.
+   * That prunes most of the library on a single subtraction. */
+  function scoreForm(x, y) {
+    if (!x || !y) return 0;
+    const longest = Math.max(x.length, y.length);
+    const budget = Math.floor((1 - SWAP_MIN) * longest);
+    if (Math.abs(x.length - y.length) > budget) return 0;
+    const d = levenshtein(x, y, budget);
+    return d > budget ? 0 : 1 - d / longest;
+  }
+
+  /* Normalised forms are computed once per track, not once per comparison. */
+  const formCache = new Map();
+  function formsOf(key, title) {
+    let f = formCache.get(key);
+    if (!f) {
+      f = { full: normalise(title), core: coreOf(title) };
+      formCache.set(key, f);
+    }
+    return f;
+  }
+
+  function similarity(a, b) {
+    const fa = formsOf("a:" + a, a);
+    const fb = formsOf("b:" + b, b);
+    return Math.max(scoreForm(fa.full, fb.full), scoreForm(fa.core, fb.core));
+  }
+
+  /* Library first. It covers both sources, needs no network, and the library
+   * genuinely holds twins — the same track posted more than once under
+   * different ids, which is exactly what a dead entry needs. */
+  function findReplacements(track) {
+    const target = formsOf(track.k, track.t);
+    const scored = [];
+    for (const t of TRACKS) {
+      if (t.k === track.k || isDead(t)) continue;
+      const f = formsOf(t.k, t.t);
+      const score = Math.max(scoreForm(target.full, f.full), scoreForm(target.core, f.core));
+      if (score >= SWAP_MIN) scored.push({ track: t, score });
+    }
+    scored.sort((a, b) => b.score - a.score || a.track.n - b.track.n);
+    return {
+      library: scored.slice(0, SWAP_MAX),
+      online: (replacements[track.k] || []).slice(0, SWAP_MAX),
+    };
+  }
+
+  async function mergeReplacements() {
+    try {
+      const res = await fetch("data/replacements.json", { cache: "no-store" });
+      if (!res.ok) return;
+      const remote = await res.json();
+      let added = 0;
+      for (const [k, list] of Object.entries(remote)) {
+        if (!replacements[k] && Array.isArray(list)) { replacements[k] = list; added++; }
+      }
+      if (added) store.write(K_SWAP, replacements);
+    } catch (e) {
+      /* no sidecar, or running from file:// — the library half stands alone */
+    }
+  }
 
   function markLiveness(track, status, code) {
     liveness[track.k] = { s: status, c: code ?? null, t: Date.now() };
@@ -212,8 +323,40 @@
     dur.className = "t-dur";
     dur.textContent = fmtDur(track.d);
 
-    li.append(fav, idx, main, src, dur);
+    /* The swap control shares the last grid cell with the duration rather than
+       adding a sixth column, which would leave a gap on every live row. */
+    const swap = document.createElement("button");
+    swap.className = "t-swap";
+    swap.type = "button";
+    swap.hidden = true;
+    swap.title = "Find a replacement";
+    swap.setAttribute("aria-label", "Find a replacement for this track");
+    swap.innerHTML = '<svg><use href="#i-swap"></use></svg>';
+    swap.addEventListener("click", (e) => {
+      /* Not a request to play the dead one. play() also refuses dead tracks,
+         so this changes no observable behaviour today — it is here because
+         "this button is not the row" is the correct semantic, and the row
+         click may grow other behaviour. There is deliberately no mutation
+         check for it: with two guards, removing one proves nothing. */
+      e.stopPropagation();
+      openSwap(track);
+    });
+
+    const tail = document.createElement("div");
+    tail.className = "t-tail";
+    tail.append(dur, swap);
+
+    li.append(fav, idx, main, src, tail);
     li.addEventListener("click", () => play(track));
+
+    /* A row built after playback started must mark itself. markCurrentRow()
+     * only reaches rows that already exist, so a track played from beyond the
+     * render window — through the wheel, or a replacement chosen for a dead
+     * one — left the list with nothing highlighted even after scrolling to it. */
+    if (state.current && state.current.k === track.k) {
+      li.setAttribute("aria-current", "true");
+      revealRow(li, track);
+    }
 
     decorateRow(li, track);
     rowIndex.set(track.k, li);
@@ -225,6 +368,9 @@
     const dead = isDead(track);
     li.classList.toggle("is-dead", dead);
     li.classList.toggle("is-suspect", !dead && rec?.s === "stalled");
+    const swap = li.querySelector(".t-swap");
+    if (swap) swap.hidden = !dead;          // hidden, not just unstyled, so it
+                                            // stays out of the tab order too
     li.title = dead
       ? "Unavailable — " + (rec.s === "blocked" ? "embedding disabled" : "removed or private")
       : rec?.s === "stalled" ? "Did not start last time — click to retry" : "";
@@ -546,6 +692,66 @@
   });
 
   // the transport heart mirrors the row hearts for whatever is playing
+  /* ------------------------------------------ replacement dialog (QoL 1) */
+
+  const swapModal = $("swapModal");
+  let swapFor = null;
+
+  function openSwap(track) {
+    swapFor = track;
+    const { library, online } = findReplacements(track);
+    const list = $("swapList");
+    list.innerHTML = "";
+
+    $("swapSub").textContent = track.t;
+
+    const add = (label, sub, score, onPick) => {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "swap-pick";
+      const name = document.createElement("span");
+      name.className = "swap-name";
+      name.textContent = label;
+      const via = document.createElement("span");
+      via.className = "swap-via";
+      via.textContent = sub;
+      const pct = document.createElement("span");
+      pct.className = "swap-score";
+      pct.textContent = score == null ? "" : Math.round(score * 100) + "%";
+      btn.append(name, via, pct);
+      btn.addEventListener("click", onPick);
+      li.appendChild(btn);
+      list.appendChild(li);
+    };
+
+    for (const c of library)
+      add(c.track.t, c.track.v ? "via " + c.track.v + " \u00b7 " + c.track.s : c.track.s,
+          c.score, () => { swapModal.close(); play(c.track); });
+
+    for (const r of online)
+      add(r.t, (r.c ? r.c + " \u00b7 " : "") + "YouTube search", r.score ?? null,
+          () => { swapModal.close(); play({ ...track, i: r.i, s: "YT", t: r.t }); });
+
+    const note = $("swapNote");
+    if (!library.length && !online.length) {
+      note.textContent = track.s === "SC"
+        ? "Nothing close enough in the library. SoundCloud has no search to fall back on — its public API has been closed since 2019."
+        : "Nothing close enough in the library, and no offline suggestion for this one.";
+    } else if (!online.length && track.s === "YT") {
+      note.textContent = "Library matches only. Offline YouTube suggestions come from data/replacements.json, which is not present.";
+    } else {
+      note.textContent = "";
+    }
+
+    swapModal.showModal();
+  }
+
+  $("swapClose").addEventListener("click", () => swapModal.close());
+  swapModal.addEventListener("click", (e) => {
+    if (e.target === swapModal) swapModal.close();      // backdrop
+  });
+
   $("statPlayed").addEventListener("click", resetPlayed);
 
   /* The only seam in the app that exists partly for the tests, and it is here
@@ -1732,6 +1938,7 @@
 
   render(true);
   mergeOfflineLiveness();
+  mergeReplacements();
   loadEqIndex();
   eqResize();
   scrubResize();

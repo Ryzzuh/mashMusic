@@ -31,6 +31,7 @@
     <symbol id="i-wheel" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/><path d="M12 3v6.4M12 14.6V21M3 12h6.4M14.6 12H21"/></symbol>
     <symbol id="i-caret" viewBox="0 0 24 24"><path d="M6 9.5 12 15.5 18 9.5"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16.2 16.2 21 21"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8.5h13M13.5 5 17 8.5 13.5 12M20 15.5H7M10.5 12 7 15.5 10.5 19"/></symbol>
     <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></symbol>
   </defs>
 </svg>
@@ -205,6 +206,18 @@
     <button class="modal-close" id="contribClose" aria-label="Close" autofocus>&times;</button>
   </header>
   <ol class="contrib-list" id="contribList"></ol>
+</dialog>
+
+<dialog class="modal" id="swapModal" aria-labelledby="swapTitle">
+  <header class="modal-head">
+    <div class="modal-heading">
+      <h2 id="swapTitle">Find a replacement</h2>
+      <p class="modal-sub" id="swapSub" aria-live="polite"></p>
+    </div>
+    <button class="modal-close" id="swapClose" aria-label="Close" autofocus>&times;</button>
+  </header>
+  <ol class="swap-list" id="swapList"></ol>
+  <p class="swap-note" id="swapNote"></p>
 </dialog>
 
 <dialog class="modal wheel-modal" id="wheelModal" aria-labelledby="wheelTitle">
