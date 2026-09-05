@@ -53,3 +53,9 @@ __pycache__/
 data/*.jpg
 data/*.jpeg
 data/*.png
+
+# node toolchain — dev only, must never reach the published site
+node_modules/
+test-results/
+playwright-report/
+.playwright/

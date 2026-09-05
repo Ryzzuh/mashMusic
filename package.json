@@ -1,0 +1,23 @@
+{
+  "name": "mashmusic",
+  "version": "1.0.0",
+  "description": "Regression suite for the mashmusic player. The site itself has no build step.",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "serve": "python3 tools/serve.py 8412"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ryzzuh/mashMusic.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Ryzzuh/mashMusic/issues"
+  },
+  "homepage": "https://github.com/Ryzzuh/mashMusic#readme",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  },
+  "type": "module"
+}

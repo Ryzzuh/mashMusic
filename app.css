@@ -12,6 +12,7 @@
   --r: 6px;
   --row-h: 54px;
   --bar-h: 34px;
+  --topbar-h: 59px;            /* fixed at every width — see .topbar */
   --ease: cubic-bezier(.22,.61,.36,1);
 }
 
@@ -55,6 +56,9 @@ html[data-skin="jukebox"] {
   --eq-mid:      #eba233;
   --eq-hi:       #fa1768;
 
+  --wheel-1: #fa1768;  --wheel-2: #eba233;  --wheel-3: #1cd320;
+  --wheel-4: #1aeac6;  --wheel-5: #a05ffb;  --wheel-6: #c4d63d;
+
   --shadow:      0 1px 0 var(--line), 0 14px 34px -20px #000;
   --stage-bg:    radial-gradient(120% 90% at 50% 0%, #2e170e 0%, #120a07 72%);
   --blur-amount: 5px;
@@ -68,7 +72,7 @@ html[data-skin="night"] {
 
   --ink:         #ece3d2;
   --ink-2:       #a49a86;
-  --ink-3:       #6f6a5f;
+  --ink-3:       #918875;
   --ink-on-tint: #0d1420;
 
   --line:        #24303f;
@@ -83,7 +87,7 @@ html[data-skin="night"] {
 
   --ok:          #7fa87f;
   --warn:        #d08a4a;
-  --dead:        #9c6a5a;
+  --dead:        #b98274;
 
   --c-prev:      #e8a33d;
   --c-play:      #e8a33d;
@@ -96,6 +100,11 @@ html[data-skin="night"] {
   --eq-lo:       #4e8fa8;
   --eq-mid:      #e8a33d;
   --eq-hi:       #ffbe5c;
+
+  /* Night Dial deliberately flattens the transport to one amber, so the wheel
+     needs its own hues or adjacent segments become indistinguishable. */
+  --wheel-1: #e8a33d;  --wheel-2: #4e8fa8;  --wheel-3: #7fa87f;
+  --wheel-4: #b98274;  --wheel-5: #9a8fb8;  --wheel-6: #c9b45e;
   --shadow:      0 1px 0 var(--line), 0 14px 32px -20px #000;
   --stage-bg:    radial-gradient(120% 90% at 50% 0%, #16222f 0%, #0d1420 70%);
   --blur-amount: 5px;
@@ -103,7 +112,14 @@ html[data-skin="night"] {
 
 * { box-sizing: border-box; }
 
-html { height: 100%; }
+/* Scroll anchoring off, deliberately. The pinned stage changes height as a
+   consequence of scrolling (QoL 10), and anchoring exists to compensate for
+   content above the viewport changing size — so it fights that expansion and
+   leaves a scroll-to-top resting 73px short, with the first rows behind the
+   pinned block. Measured: default anchoring settles at 73, `none` settles at 0.
+   The tracklist only ever appends rows below the viewport, so there is nothing
+   here that anchoring was helping. */
+html { height: 100%; overflow-anchor: none; }
 body { min-height: 100%; }
 
 body {
@@ -124,21 +140,26 @@ button { font: inherit; color: inherit; }
 
 /* ---------- topbar ---------- */
 
+/* QoL 2: one height at every width. Nothing wraps — the search shrinks to a
+ * floor, then whole controls move into #toolsPanel, so the bar's height is a
+ * constant the stage and the collapsing-scroll behaviour can both rely on. */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 30;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 14px 20px;
-  padding: 11px 18px;
+  gap: 20px;
+  height: var(--topbar-h);
+  padding: 0 18px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
 
 .brand {
   display: flex;
+  flex: none;
   align-items: baseline;
   gap: 8px;
   font-family: Archivo, sans-serif;
@@ -160,11 +181,13 @@ button { font: inherit; color: inherit; }
 
 .tools {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   margin-left: auto;
 }
+.tools > * { flex: none; }
 
 .search {
   display: flex;
@@ -172,7 +195,12 @@ button { font: inherit; color: inherit; }
   gap: 8px;
   padding: 0 10px;
   height: 34px;
-  min-width: 240px;
+  /* shrinks before anything collapses, but never below a usable field —
+     the floor is what makes the overflow measurable. No !important needed:
+     this rule and `.tools > *` have equal specificity and this one is later. */
+  flex: 1 1 240px;
+  min-width: 124px;
+  max-width: 300px;
   background: var(--sunk);
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -205,7 +233,8 @@ button { font: inherit; color: inherit; }
   overflow: hidden;
   background: var(--sunk);
 }
-.switch button {
+.switch button,
+.listmode > button {
   appearance: none;
   border: 0;
   background: none;
@@ -220,13 +249,118 @@ button { font: inherit; color: inherit; }
   white-space: nowrap;
   transition: background .15s var(--ease), color .15s var(--ease);
 }
-.switch button + button { border-left: 1px solid var(--line); }
-.switch button:hover { color: var(--ink); }
-.switch button[aria-pressed="true"] {
+.switch button + button,
+.listmode > button + button { border-left: 1px solid var(--line); }
+.switch button:hover,
+.listmode > button:hover { color: var(--ink); }
+.switch button[aria-pressed="true"],
+.listmode > button.is-active {
   background: var(--check);
   color: var(--check-ink);
   font-weight: 500;
 }
+
+/* The list-mode control deliberately does NOT use .switch: that sets
+   overflow:hidden for its rounded corners, which clipped this menu away
+   entirely. Same look, own box, corners rounded per-child instead. */
+.listmode {
+  position: relative;
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--sunk);
+}
+.listmode > button:first-of-type {
+  border-radius: calc(var(--r) - 1px) 0 0 calc(var(--r) - 1px);
+}
+.listmode > button:last-of-type {
+  border-radius: 0 calc(var(--r) - 1px) calc(var(--r) - 1px) 0;
+}
+
+.listmode-more {
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+}
+.listmode-more svg {
+  width: 12px; height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .16s var(--ease);
+}
+.listmode-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+.listmode-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 132px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line-hard);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.listmode-menu[hidden] { display: none; }
+.listmode-menu button {
+  appearance: none;
+  border: 0;
+  height: auto;
+  background: none;
+  text-align: left;
+  padding: 9px 12px;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.listmode-menu button:hover { background: var(--sunk); color: var(--ink); }
+.listmode-menu button[aria-current="true"] { color: var(--accent); }
+
+/* a painter's palette straddling the divider between the two themes */
+.skin-switch { position: relative; }
+
+.skin-badge {
+  position: relative;
+  width: 0;
+  display: grid;
+  place-items: center;
+  z-index: 2;
+  pointer-events: none;
+}
+/* the span breaks button + button, so restate the divider it replaced */
+.skin-badge::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.skin-badge svg {
+  position: absolute;
+  width: 24px;
+  height: 20px;
+  overflow: visible;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .55));
+}
+.pal-body {
+  fill: var(--raised);
+  stroke: var(--line-hard);
+  stroke-width: 1;
+}
+.pal-drop { stroke: rgba(0, 0, 0, .25); stroke-width: .5; }
+.pal-a { fill: var(--accent); }
+.pal-b { fill: var(--tint); }
+.pal-c { fill: var(--ok); }
 
 /* ---------- stage ---------- */
 
@@ -393,14 +527,140 @@ main {
 /* ---------- transport ---------- */
 
 .transport {
+  /* 130px is the midpoint of the gap between the tracklist's number and name
+     columns (18 pad + 40 fav + 12 gap + 54 index + 6), so the flank ends
+     exactly there rather than at an eyeballed 1/8. */
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) 172px;
+  align-items: stretch;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.tcontrols {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
   gap: 10px;
   padding: 14px 18px;
+}
+
+/* The flanks carry the tracklist's surface, not the transport's, so they read
+   as an extension of the list they align to. */
+.tflank {
+  background: var(--ground);
+  display: grid;
+  align-items: center;
+}
+.tflank-left {
+  grid-template-columns: 40px 54px;
+  gap: 12px;
+  padding-left: 18px;
+  border-right: 1px solid var(--line);
+}
+.tflank-right {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 18px 0 12px;
+  border-left: 1px solid var(--line);
+}
+
+.tflank-fav { justify-self: start; }
+.tflank-fav[disabled] { opacity: .35; cursor: not-allowed; }
+.tjump[disabled] { opacity: .35; cursor: not-allowed; }
+
+/* the jump control, sitting over the track-number column */
+.tjump-wrap { display: flex; align-items: stretch; height: 50px; gap: 2px; }
+
+.tjump {
+  appearance: none;
+  flex: 1;
+  border: 1px solid var(--line-hard);
+  border-radius: 4px;
   background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.tjump svg {
+  width: 15px; height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+.tjump:hover { color: var(--accent); border-color: var(--accent); }
+
+/* two stacked cells: top jumps to the start of the list, bottom to the end */
+.tjump-tab {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  /* flex: none, or the wrap shrinks this below the WCAG 2.5.8 target size —
+     it was landing at 23px wide with the width declaration already in place */
+  flex: 0 0 24px;
+  gap: 2px;
+}
+.tjump-tab button {
+  appearance: none;
+  border: 1px solid var(--line-hard);
+  border-radius: 2px;
+  background: var(--panel);
+  cursor: pointer;
+  padding: 0;
+}
+.tjump-tab button:hover { background: var(--accent); border-color: var(--accent); }
+
+/* source filter */
+.tsource { display: grid; grid-template-rows: 1fr 1fr; gap: 3px; }
+.tsource button {
+  appearance: none;
+  padding: 2px 7px;
+  border: 1px solid var(--line-hard);
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: .1em;
+}
+.tsource button[aria-pressed="true"] {
+  background: var(--check);
+  border-color: var(--check);
+  color: var(--check-ink);
+}
+
+/* three stacked readouts */
+.tmetrics {
+  margin: 0;
+  min-width: 0;                /* never widen the track it sits in */
+  display: grid;
+  gap: 1px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.tmetrics > div { display: flex; justify-content: space-between; gap: 6px; }
+.tmetrics dt {
+  font-size: 8.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.tmetrics dd {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--ink-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .transport { grid-template-columns: 1fr; }
+  .tflank { display: none; }      /* the controls matter more than the readouts */
 }
 
 .tbtn {
@@ -414,7 +674,8 @@ main {
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition: transform .12s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+  transition: transform .12s var(--ease), border-color .15s var(--ease),
+              background .15s var(--ease), box-shadow .18s var(--ease);
 }
 .tbtn svg {
   width: 21px; height: 21px;
@@ -429,6 +690,40 @@ main {
   border-color: var(--check);
 }
 .tbtn[disabled] { opacity: .35; cursor: not-allowed; transform: none; }
+
+/* ------------------------------------------------ neon halo (Jukebox 11)
+ *
+ * Each button glows in its own tube colour — the seven Jukebox hues, or the
+ * single amber the Night Dial palette collapses them to. The colour comes
+ * from --btn, which every .tbtn already sets for its icon, so the halo cannot
+ * drift out of step with the glyph it surrounds.
+ *
+ * The glow is a box-shadow only. It never tints the button face, so the icon
+ * keeps its measured contrast against --raised: 4.39:1 at worst in Jukebox,
+ * 7.24:1 in Night, both clear of WCAG 1.4.11's 3:1 for non-text graphics.
+ *
+ * If color-mix is unavailable, --halo is invalid at computed-value time and
+ * box-shadow falls back to none. The buttons lose the glow and nothing else. */
+.tbtn {
+  --halo: color-mix(in srgb, var(--btn, var(--accent)) 55%, transparent);
+  box-shadow: 0 0 10px -3px var(--halo), inset 0 0 7px -4px var(--halo);
+}
+.tbtn:hover {
+  box-shadow: 0 0 17px -2px var(--halo), inset 0 0 11px -5px var(--halo);
+}
+.tbtn:active,
+.tbtn[aria-pressed="true"] {
+  box-shadow: 0 0 23px -1px var(--halo), inset 0 0 13px -5px var(--halo);
+}
+/* a dead tube does not glow */
+.tbtn[disabled] { box-shadow: none; }
+
+/* The halo is a shadow, and so is many a focus ring — keep the ring drawn as
+   an outline so the glow cannot swallow it. */
+.tbtn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
 
 .t-prev   { --btn: var(--c-prev); }
 .t-play   { --btn: var(--c-play); }
@@ -620,6 +915,7 @@ main {
 
 .brand-info {
   appearance: none;
+  position: relative;   /* anchors the active-filter dot */
   width: 22px;
   height: 22px;
   padding: 0;
@@ -695,7 +991,6 @@ main {
 
 .modal-close {
   appearance: none;
-  margin-left: auto;
   width: 26px; height: 26px;
   padding: 0;
   border: 1px solid var(--line);
@@ -717,12 +1012,60 @@ main {
 }
 
 .contrib {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr) 62px 34px;
   align-items: center;
   gap: 10px;
   padding: 5px 16px;
 }
+
+.contrib:hover { background: var(--sunk); }
+/* the row sits flush with .contrib-list's scroll clip, so an outward ring is
+   sliced off at both edges — draw it inside instead */
+.contrib { outline-offset: -2px; }
+
+/* Selection is marked, not dimmed. opacity here dropped the name to 2.8:1 and
+   the focus ring to 1.6:1, which no contrast test that reads CSS variables can
+   see, because it composites at paint time. */
+.contrib[aria-pressed="true"] { box-shadow: inset 3px 0 0 var(--accent); }
+.contrib[aria-pressed="false"] .contrib-name,
+.contrib[aria-pressed="false"] .contrib-n { color: var(--ink-3); }
+.contrib[aria-pressed="false"] .contrib-bar i { background: var(--line-hard); }
+
+.modal-action {
+  appearance: none;
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--line-hard);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.modal-action:hover { color: var(--ink); border-color: var(--ink-3); }
+
+.brand-info-dot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.brand-info-dot[hidden] { display: none; }
 
 .contrib-rank {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
@@ -765,12 +1108,18 @@ main {
 .stage-strip {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 14px;
   min-height: 0;
   min-width: 0;
 }
+/* Pin the columns explicitly. Without this the spectrum drops into the auto
+   column whenever the art tile is hidden, and sizes to content rather than
+   filling the row. */
+.art { grid-column: 1; }
+.eq  { grid-column: 2; }
 
 .art {
+  /* the gap lives here, not on the grid, so it disappears with the tile */
+  margin-right: 14px;
   aspect-ratio: 1;
   height: 100%;
   background: var(--sunk);
@@ -845,3 +1194,316 @@ main {
 }
 
 @media (max-width: 620px) { #scrubber { height: 26px; } }
+
+/* ---------- contributor wheel ---------- */
+
+.t-wheel { --btn: var(--tint); }
+.t-wheel svg {
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.wheel-modal {
+  width: min(420px, calc(100vw - 36px));
+  max-height: min(88vh, 660px);
+  margin: 5vh auto 0;          /* launched from the transport, so not anchored
+                                  under the brand like the contributors panel */
+}
+
+.wheel-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--sunk);
+  min-height: 0;               /* shrink before the footer does */
+  overflow-y: auto;
+}
+#wheelCanvas { display: block; width: 100%; max-width: 340px; aspect-ratio: 1; }
+.wheel-foot { flex: none; }
+
+/* the marker the wheel lands against, at twelve o'clock */
+.wheel-pointer {
+  position: absolute;
+  top: 6px;
+  width: 0;
+  height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 14px solid var(--ink);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5));
+}
+
+.wheel-foot {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.wheel-spin {
+  appearance: none;
+  padding: 10px 30px;
+  border: 1px solid var(--accent);
+  border-radius: 100px;
+  background: var(--accent);
+  color: var(--check-ink);
+  cursor: pointer;
+  font-family: Archivo, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: .02em;
+}
+.wheel-spin:hover { background: var(--accent-lift); border-color: var(--accent-lift); }
+.wheel-spin[disabled] { opacity: .5; cursor: not-allowed; }
+
+
+/* ------------------------------------------------- topbar overflow menu */
+
+.tools-more {
+  appearance: none;
+  display: none;                 /* [hidden] is not enough against display:flex */
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--sunk);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.tools-more:not([hidden]) { display: inline-flex; }
+.tools-more svg { width: 17px; height: 17px; fill: currentColor; }
+.tools-more:hover { color: var(--ink); border-color: var(--accent); }
+.tools-more[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+
+/* absolutely positioned, so nothing it holds can add to the bar's height */
+.tools-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 12px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line-hard);
+  border-radius: var(--r);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .34);
+}
+.tools-panel[hidden] { display: none; }
+.tools-panel .switch,
+.tools-panel .listmode { width: 100%; }
+.tools-panel .switch button,
+.tools-panel .listmode > button { flex: 1 1 auto; white-space: nowrap; }
+/* the picker drops from the panel, not from a bar that is no longer above it */
+.tools-panel .listmode-menu { top: calc(100% + 4px); right: 0; }
+
+@media (max-width: 560px) {
+  .brand-note { display: none; }   /* the count also lives in the statusbar */
+  .topbar { gap: 12px; padding: 0 12px; }
+}
+
+/* Under ~340px both controls are already collapsed and the search is pinned at
+ * its floor, so there is nothing left to give and the document starts to
+ * scroll sideways. 320px is still a live target: iPhone SE 1st gen, the Galaxy
+ * Fold cover screen, and any 360px phone at 110% text zoom. */
+@media (max-width: 340px) {
+  .topbar { gap: 8px; padding: 0 8px; }
+  .brand { font-size: 17px; }
+  .brand-mark.alt { display: none; }   /* "mash" alone still reads as the mark */
+  .search { min-width: 96px; }
+}
+
+
+/* --------------------------------------------- collapsing stage (QoL 10) */
+
+/* The stage and the scrubber pin as one unit under the top bar, so what is
+ * playing — and the ability to seek it — stay on screen while the list
+ * scrolls. Wrapping them also means the 33px from the artwork's bottom to the
+ * scrubber is preserved through the collapse for free: it is still just the
+ * stage's bottom padding and the scrubber's top padding, in normal flow. */
+.pinned {
+  /* The transport is in here too. It sits above the tracklist in flow, so
+     pinning the stage over it would have put the play, next and jump controls
+     behind the stage the moment the list scrolled — and milestone 4 aligned
+     its flanks to the tracklist's own columns, which only reads correctly
+     while the two are adjacent. */
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 20;
+}
+
+/* fr values interpolate, so the video column can be animated shut. The row/
+ * column flip inside .stage-side is not animatable and switches at the same
+ * moment; the eye reads the video closing as the whole motion. */
+.stage {
+  transition: grid-template-columns .3s var(--ease), gap .3s var(--ease);
+}
+.stage-media { min-width: 0; overflow: hidden; }
+
+.stage.is-collapsed {
+  grid-template-columns: 0fr minmax(0, 1fr);
+  gap: 22px 0;
+}
+.stage.is-collapsed .stage-media {
+  /* not display:none — a zero-width flex/grid child still animates, and the
+     YouTube iframe must not be torn out of the document mid-playback */
+  opacity: 0;
+  pointer-events: none;
+}
+.stage.is-collapsed .stage-side {
+  height: auto;
+  min-height: 0;
+  grid-template-rows: none;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  align-items: center;
+  gap: 0 33px;
+}
+/* Shorter than the 106px it has expanded: the pinned block also carries the
+   scrubber and the transport, and every pixel here is a pixel of tracklist.
+   The 33px from the artwork's bottom to the scrubber is unaffected — it is the
+   stage's bottom padding plus the scrubber's, not anything derived from this. */
+.stage.is-collapsed .stage-strip { height: 72px; }
+.stage.is-collapsed .stage-meta { justify-content: center; gap: 4px; }
+.stage.is-collapsed .np-sub,
+.stage.is-collapsed .np-flags { display: none; }
+.stage.is-collapsed .np-title { font-size: 21px; }
+
+@media (max-width: 860px) {
+  /* single column already; collapsing here would leave almost nothing, and a
+     pinned stage on a short viewport eats the list */
+  .pinned { position: static; }
+  .stage.is-collapsed { grid-template-columns: 1fr; gap: 16px; }
+  .stage.is-collapsed .stage-media { display: none; }
+}
+
+/* No reduced-motion block here: the global rule near .statusbar already caps
+   every transition-duration at .01ms !important, and that wins over a local
+   `transition: none` anyway. */
+
+
+/* ------------------------------------------- decaying tracklist (Jukebox 3)
+ *
+ * A row that has been played to the end pops before it leaves. The animation
+ * is what the removal waits on, so it must always finish: the global
+ * reduced-motion rule caps it to .01ms, which fires animationend immediately
+ * rather than stranding playback. */
+@keyframes rowPop {
+  0%   { transform: scale(1);    opacity: 1; }
+  35%  { transform: scale(1.02); opacity: 1; background: var(--sunk); }
+  100% { transform: scale(.96);  opacity: 0; }
+}
+.trow.is-popping {
+  animation: rowPop .32s var(--ease) forwards;
+  pointer-events: none;
+}
+
+.stat-reset {
+  appearance: none;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+.stat-reset:hover { color: var(--ink); border-color: var(--accent); }
+.stat-reset[hidden] { display: none; }
+
+
+/* --------------------------------------- replacement search (QoL 1) */
+
+/* .modal is anchored under the brand because the contributors panel explains
+   the count directly above it. This one is opened from a row far down the
+   list, so it belongs in the middle of the screen. */
+#swapModal {
+  margin: auto;
+  width: min(470px, calc(100vw - 36px));
+}
+#swapModal .swap-note { padding: 0 12px 12px; margin: 0; }
+
+/* shares the last grid cell with the duration, so a live row gains no gap */
+.t-tail { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+
+.t-swap {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-hard);
+  border-radius: var(--r);
+  background: var(--sunk);
+  color: var(--accent);
+  cursor: pointer;
+}
+.t-swap[hidden] { display: none; }
+.t-swap svg {
+  width: 15px; height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.t-swap:hover { border-color: var(--accent); background: var(--raised); }
+/* the row is line-through and dimmed; its one live control must not be */
+.trow.is-dead .t-swap { opacity: 1; cursor: pointer; }
+
+.swap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.swap-pick {
+  appearance: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name score" "via score";
+  align-items: center;
+  gap: 0 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.swap-pick:hover { background: var(--sunk); }
+.swap-name { grid-area: name; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swap-via {
+  grid-area: via;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.swap-score {
+  grid-area: score;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.swap-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.swap-note:empty { display: none; }

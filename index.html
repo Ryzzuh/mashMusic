@@ -27,7 +27,12 @@
     <symbol id="i-random" viewBox="0 0 24 24"><path d="M3 6.5h3.2c1.4 0 2.2.7 3 1.9l4.6 7.2c.8 1.2 1.6 1.9 3 1.9H21M3 17.5h3.2c1.4 0 2.2-.7 3-1.9l1.3-2M13.6 8.4l1.2-1.9c.8-1.2 1.6-1.9 3-1.9H21M18 2.5 21.5 6 18 9.5M18 14.5l3.5 3.5-3.5 3.5"/></symbol>
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.4 4.6 13c-2-2-2-5.2 0-7.2s5.2-2 7.2 0l.2.2.2-.2c2-2 5.2-2 7.2 0s2 5.2 0 7.2z"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 10.6v6.2"/><circle cx="12" cy="7.6" r="1.15"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></symbol>
+    <symbol id="i-wheel" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/><path d="M12 3v6.4M12 14.6V21M3 12h6.4M14.6 12H21"/></symbol>
+    <symbol id="i-caret" viewBox="0 0 24 24"><path d="M6 9.5 12 15.5 18 9.5"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16.2 16.2 21 21"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8.5h13M13.5 5 17 8.5 13.5 12M20 15.5H7M10.5 12 7 15.5 10.5 19"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></symbol>
   </defs>
 </svg>
 
@@ -38,6 +43,7 @@
     <button class="brand-info" id="btnContrib" aria-haspopup="dialog" title="Who posted these?">
       <svg aria-hidden="true"><use href="#i-info"></use></svg>
       <span class="sr-only">Contributors</span>
+      <span class="brand-info-dot" id="contribFilterDot" hidden></span>
     </button>
   </div>
 
@@ -47,21 +53,53 @@
       <input type="search" id="search" placeholder="Search titles and posters" autocomplete="off" spellcheck="false">
     </label>
 
-    <div class="switch" role="group" aria-label="Track list visibility">
-      <button data-listmode="show" aria-pressed="true">Shown</button>
-      <button data-listmode="blur" aria-pressed="false">Obfuscated</button>
-      <button data-listmode="hide" aria-pressed="false">Hidden</button>
+    <div class="listmode" role="group" aria-label="Track list visibility">
+      <button class="listmode-current" id="listModeCurrent" data-listmode="show"
+              title="Back to plain titles">Shown</button>
+      <button class="listmode-more" id="listModeMore" aria-controls="listModeMenu"
+              aria-expanded="false" aria-label="Obfuscate or hide titles">
+        <svg aria-hidden="true"><use href="#i-caret"></use></svg>
+      </button>
+      <div class="listmode-menu" id="listModeMenu" hidden>
+        <button data-listmode="blur">Obfuscated</button>
+        <button data-listmode="hide">Hidden</button>
+      </div>
     </div>
 
-    <div class="switch" role="group" aria-label="Theme">
+    <div class="switch skin-switch" role="group" aria-label="Theme">
       <button data-skin="jukebox" aria-pressed="true">Jukebox</button>
+      <span class="skin-badge" aria-hidden="true">
+        <svg viewBox="0 0 32 26">
+          <defs>
+            <mask id="skinPaletteHole">
+              <rect width="32" height="26" fill="#fff"></rect>
+              <circle cx="11" cy="18" r="3.2" fill="#000"></circle>
+            </mask>
+          </defs>
+          <ellipse class="pal-body" cx="16" cy="13" rx="14.5" ry="11.5"
+                   mask="url(#skinPaletteHole)"></ellipse>
+          <circle class="pal-drop pal-a" cx="9"  cy="8" r="2.5"></circle>
+          <circle class="pal-drop pal-b" cx="16" cy="6" r="2.5"></circle>
+          <circle class="pal-drop pal-c" cx="23" cy="8" r="2.5"></circle>
+        </svg>
+      </span>
       <button data-skin="night" aria-pressed="false">Night Dial</button>
     </div>
+
+    <button class="tools-more" id="toolsMore" hidden type="button"
+            aria-controls="toolsPanel" aria-expanded="false" aria-label="More controls">
+      <svg aria-hidden="true"><use href="#i-dots"></use></svg>
+    </button>
+    <div class="tools-panel" id="toolsPanel" hidden></div>
   </div>
 </header>
 
 <main>
 
+  <!-- QoL 10: the stage and the scrubber pin together. Keeping them in one
+       sticky wrapper is what preserves the gap from the artwork's bottom to
+       the scrubber through the collapse — it stays ordinary flow spacing. -->
+  <div class="pinned">
   <section class="stage" aria-label="Now playing">
     <div class="stage-media">
       <div class="media-slot" id="slotYT" hidden><div id="ytPlayer"></div></div>
@@ -105,6 +143,27 @@
   </section>
 
   <section class="transport" aria-label="Transport">
+    <!-- mirrors the tracklist's first two columns so the heart sits above the
+         row hearts and the jump control above the track numbers -->
+    <div class="tflank tflank-left">
+      <button class="t-fav tflank-fav" id="tFav" type="button" aria-pressed="false" aria-label="Favourite the playing track"
+              title="Favourite the playing track">
+        <svg><use href="#i-heart"></use></svg>
+      </button>
+
+      <div class="tjump-wrap">
+        <button class="tjump" id="tJump" type="button" title="Jump to the playing track"
+                aria-label="Jump to the playing track">
+          <svg><use href="#i-target"></use></svg>
+        </button>
+        <span class="tjump-tab">
+          <button id="tTop" type="button" aria-label="Jump to the top of the list" title="Top"></button>
+          <button id="tBottom" type="button" aria-label="Jump to the bottom of the list" title="Bottom"></button>
+        </span>
+      </div>
+    </div>
+
+    <div class="tcontrols">
     <button class="tbtn t-prev"   id="bPrev"   title="Previous"><svg><use href="#i-prev"></use></svg></button>
     <button class="tbtn t-play"   id="bPlay"   title="Play"><svg><use href="#i-play"></use></svg></button>
     <button class="tbtn t-pause"  id="bPause"  title="Pause"><svg><use href="#i-pause"></use></svg></button>
@@ -112,7 +171,22 @@
     <button class="tbtn t-stop"   id="bStop"   title="Stop"><svg><use href="#i-stop"></use></svg></button>
     <button class="tbtn t-random" id="bRandom" title="Shuffle" aria-pressed="false"><svg><use href="#i-random"></use></svg></button>
     <button class="tbtn t-heart"  id="bFavs"   title="Favourites only" aria-pressed="false"><svg><use href="#i-heart"></use></svg></button>
+    <button class="tbtn t-wheel"  id="bWheel"  title="Spin for a contributor" aria-haspopup="dialog"><svg><use href="#i-wheel"></use></svg></button>
+    </div>
+
+    <div class="tflank tflank-right">
+      <div class="tsource" role="group" aria-label="Filter by source">
+        <button id="fltYT" type="button" data-source="YT" aria-pressed="true">YT</button>
+        <button id="fltSC" type="button" data-source="SC" aria-pressed="true">SC</button>
+      </div>
+      <dl class="tmetrics">
+        <div><dt>left</dt><dd id="mAllRemain">--:--</dd></div>
+        <div><dt>track</dt><dd id="mTrackRemain">--:--</dd></div>
+        <div><dt>tracks</dt><dd id="mTracksLeft">0</dd></div>
+      </dl>
+    </div>
   </section>
+  </div><!-- /.pinned -->
 
   <section class="listing" aria-label="Tracks">
     <ol class="tracklist" id="tracklist"></ol>
@@ -126,16 +200,52 @@
   <header class="modal-head">
     <div class="modal-heading">
       <h2 id="contribTitle">Contributors</h2>
-      <p class="modal-sub" id="contribSub"></p>
+      <p class="modal-sub" id="contribSub" aria-live="polite"></p>
     </div>
-    <button class="modal-close" id="contribClose" aria-label="Close">&times;</button>
+    <button class="modal-action" id="contribAll" aria-pressed="true">All</button>
+    <button class="modal-close" id="contribClose" aria-label="Close" autofocus>&times;</button>
   </header>
   <ol class="contrib-list" id="contribList"></ol>
+</dialog>
+
+<dialog class="modal" id="swapModal" aria-labelledby="swapTitle">
+  <header class="modal-head">
+    <div class="modal-heading">
+      <h2 id="swapTitle">Find a replacement</h2>
+      <p class="modal-sub" id="swapSub" aria-live="polite"></p>
+    </div>
+    <button class="modal-close" id="swapClose" aria-label="Close" autofocus>&times;</button>
+  </header>
+  <ol class="swap-list" id="swapList"></ol>
+  <p class="swap-note" id="swapNote"></p>
+</dialog>
+
+<dialog class="modal wheel-modal" id="wheelModal" aria-labelledby="wheelTitle">
+  <header class="modal-head">
+    <div class="modal-heading">
+      <h2 id="wheelTitle">Spin for a contributor</h2>
+      <p class="modal-sub" id="wheelSub" aria-live="polite"></p>
+    </div>
+    <button class="modal-action" id="wheelWeight">Weighted</button>
+    <button class="modal-close" id="wheelClose" aria-label="Close" autofocus>&times;</button>
+  </header>
+
+  <div class="wheel-stage">
+    <canvas id="wheelCanvas"></canvas>
+    <span class="wheel-pointer" aria-hidden="true"></span>
+  </div>
+
+  <footer class="wheel-foot">
+    <button class="wheel-spin" id="wheelSpin">Spin</button>
+  </footer>
 </dialog>
 
 <footer class="statusbar">
   <span id="statLoaded">—</span>
   <span id="statDead"></span>
+  <span id="statSrc"></span>
+  <button id="statPlayed" class="stat-reset" type="button" hidden
+          title="Bring played tracks back into the list"></button>
   <span class="stat-spacer"></span>
   <span id="statNote"></span>
 </footer>
