@@ -6,6 +6,28 @@ to undo it.
 
 ---
 
+## 2026-09-05 — QoL 3 closed: it was the decaying tracklist, already built
+
+**Unclear:** QoL 3's sentence in the spec was cut off mid-thought, so I parked
+it rather than guess. It stayed parked through the whole run.
+
+**Resolved:** it was the decaying tracklist — the same feature as Jukebox 3,
+written twice in the dump under two numbering schemes. It shipped in milestone
+8: a track leaves the list once played to the end, persists across reloads,
+skipping never counts, with a reset control in the status bar.
+
+**Chosen:** nothing to build. Closed as a duplicate.
+
+**Worth noting for next time:** parking it was still right. Had I guessed, the
+plausible readings were a *visual* decay — dimming played rows while leaving
+them selectable — which is a different and worse feature than removal, and one
+that would have conflicted with Jukebox 3 when I got to it. Two numbered lists
+describing one feature is exactly the ambiguity worth waiting on.
+
+**Still parked:** QoL 9, the draggable artwork modal.
+
+---
+
 ## 2026-09-05 — The replacements sidecar is asked for only when it can help
 
 **Unclear:** how to "skip the fetch when there is no sidecar", which is what
