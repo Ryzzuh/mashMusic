@@ -294,5 +294,23 @@ mut 'the sidecar is fetched even with nothing dead' app.js \
   '    ' \
   tests/replace.spec.js 'not requested when nothing is dead'
 
+# ---------------------------------------------------------- self-hosted fonts
+
+mut 'the Google Fonts import comes back' app.css \
+  '/* Self-hosted fonts.' \
+  '@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&display=swap");
+/* Self-hosted fonts.' \
+  tests/fonts.spec.js 'nothing is fetched from a font CDN'
+
+mut 'a font file path is broken' app.css \
+  "  src: url('assets/fonts/archivo-latin.woff2') format('woff2');" \
+  "  src: url('assets/fonts/archivo-missing.woff2') format('woff2');" \
+  tests/fonts.spec.js 'real families are in use'
+
+mut 'the latin-ext subset is dropped' app.css \
+  "  src: url('assets/fonts/barlow-400-latin-ext.woff2') format('woff2');" \
+  "  src: url('assets/fonts/barlow-400-latin.woff2') format('woff2');" \
+  tests/fonts.spec.js 'latin-ext covers the one title'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi
