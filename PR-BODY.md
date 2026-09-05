@@ -161,8 +161,8 @@ The YouTube half of milestone 9 needs a key and a run — see
 `tools/find-replacements.mjs`, and note `search.list` bills 100 quota units per
 call against a 10,000/day default, so it is 100 dead tracks per day.
 
-One spec item is parked pending clarification: **QoL 9**, the draggable
-artwork modal. (**QoL 3** turned out to be the decaying tracklist — the same
-feature as Jukebox 3, numbered twice in the dump — and shipped in milestone 8.)
+Nothing is parked. **QoL 3** turned out to be the decaying tracklist — the same
+feature as Jukebox 3, numbered twice in the dump — and shipped in milestone 8.
+**QoL 9**, the draggable artwork modal, was dropped.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

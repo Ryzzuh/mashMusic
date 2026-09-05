@@ -6,6 +6,25 @@ to undo it.
 
 ---
 
+## 2026-09-05 — QoL 9 dropped: the draggable artwork modal
+
+**What it was:** open the cover art in a modal the user can drag around the
+screen. Parked at the start of the run alongside QoL 3, and never built.
+
+**Chosen:** dropped, on your call. Nothing was started, so there is nothing to
+remove — the artwork panel beside the spectrum stays as it is.
+
+**If it comes back:** the pieces are already there. `setArtwork()` resolves and
+loads the image, `#artPanel` holds it, and `tests/artwork.spec.js` covers the
+sizing. A draggable modal would be a new dialog plus pointer-move handling; the
+existing modals (`#contribModal`, `#swapModal`) are the pattern, though none of
+them are draggable, so that part would be genuinely new.
+
+**Nothing is parked now.** Every item in the spec dump is either built or
+deliberately dropped, and both closures are recorded here.
+
+---
+
 ## 2026-09-05 — QoL 3 closed: it was the decaying tracklist, already built
 
 **Unclear:** QoL 3's sentence in the spec was cut off mid-thought, so I parked
