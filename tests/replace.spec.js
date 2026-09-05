@@ -186,3 +186,56 @@ test("the dialog closes on Escape and on the backdrop", async ({ page }) => {
   await page.click("#swapClose");
   await expect(page.locator("#swapModal")).toBeHidden();
 });
+
+
+/* ------------------------------------------------ the sidecar request itself */
+
+const sidecarRequests = async (page, fn) => {
+  const asked = [];
+  const listener = (r) => { if (r.url().includes("replacements.json")) asked.push(r.url()); };
+  page.on("request", listener);
+  await fn();
+  page.off("request", listener);
+  return asked.length;
+};
+
+test("the sidecar is not requested when nothing is dead", async ({ page }) => {
+  /* data/replacements.json does not exist yet — it needs an API key to
+   * generate — so asking for it on every load logged a 404 in production for
+   * every visitor. A missing file cannot be detected without requesting it,
+   * but replacements are only consulted for a dead track, so with nothing dead
+   * there is nothing to look up. */
+  const n = await sidecarRequests(page, async () => {
+    await page.reload();
+    await page.waitForTimeout(1200);
+  });
+  expect(n).toBe(0);
+});
+
+test("the sidecar is requested once a track is dead", async ({ page }) => {
+  const [dead] = await twinPair(page);
+  await markDead(page, [dead.k]);
+
+  const n = await sidecarRequests(page, async () => {
+    await page.reload();
+    await page.waitForTimeout(1200);
+  });
+  expect(n).toBe(1);          // asked for, and asked for only once
+});
+
+test("a track dying mid-session pulls the sidecar in", async ({ page }) => {
+  const n = await sidecarRequests(page, async () => {
+    await page.waitForTimeout(600);
+    // the runtime path: a player reports the id is gone
+    await page.evaluate(() => {
+      const row = document.querySelector(".trow");
+      const key = row.dataset.key;
+      const live = JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}");
+      live[key] = { s: "gone", c: 100, t: Date.now() };
+      localStorage.setItem("mash.liveness.v1", JSON.stringify(live));
+    });
+    await page.reload();
+    await page.waitForTimeout(1200);
+  });
+  expect(n).toBe(1);
+});

@@ -6,6 +6,73 @@ to undo it.
 
 ---
 
+## 2026-09-05 — The replacements sidecar is asked for only when it can help
+
+**Unclear:** how to "skip the fetch when there is no sidecar", which is what
+the 404 in production needed. Strictly, you cannot: a missing file is only
+detectable by asking for it, and that request *is* the detection.
+
+**Chosen:** ask only when the answer could matter. Replacements are consulted
+for dead tracks and nothing else, so with nothing dead there is nothing to look
+up. `mergeReplacements()` now returns early unless some track is known dead,
+and is attempted at most once per load. It is retried when the offline liveness
+merge lands (which can reveal dead tracks) and when a player reports one dead
+mid-session.
+
+**Effect:** zero requests, and so zero 404s, on an ordinary page load —
+verified 0 with nothing dead, 1 with a dead track. If a visitor does have a
+dead track and the sidecar still is not deployed, they get exactly one 404,
+which is honest: the file was genuinely wanted.
+
+**The alternative I did not take:** committing an empty `data/replacements.json`
+of `{}`, which is what `data/liveness.json` already does. It would also silence
+the 404, in one line, with no logic. I preferred not asking at all over asking
+and being told nothing, but it is a fair swap if you would rather have the
+symmetry with liveness.
+
+**Reverse:** two guard lines at the top of `mergeReplacements()`.
+
+---
+
+## 2026-09-05 — Never run git while tools/mutate.sh is running
+
+I flagged this hazard days ago, in the entry about holding off milestone 6
+while a reviewer might invoke the harness. Then I did it anyway.
+
+`mutate.sh` edits `app.js` and `app.css` in place and restores them from
+`.bak`. While it was mid-run I used `git stash` to A/B a test, which captured a
+transient *mutated* tree; the pop then planted a deliberately broken tube
+colour (`--c-next: #3a2a20`, the 3:1 contrast mutation) into my working files.
+
+Two false conclusions came out of that before I noticed:
+
+1. I reported that my sidecar change broke the artwork-to-scrubber gap test —
+   "fails with, passes without". Both halves were measured against a tree that
+   was not what I thought it was. Run cleanly, the change breaks nothing.
+2. The harness reported MISSED for the contrast check, which was the leaked
+   mutation confusing its own bookkeeping, not a weak test.
+
+**Rule:** no `git stash`, `checkout`, or `commit` while the harness is running.
+Wait for it. The `git status` after every run is worth reading, too — the
+leaked hex value was visible there the whole time.
+
+---
+
+## 2026-09-05 — The scroll-anchoring test was a one-in-three gate
+
+Reintroducing the bug made the behavioural test fail **once in three runs**:
+whether the compensation fires depends on scroll timing, so asserting the
+symptom is inherently flaky. It now also asserts the declaration —
+`getComputedStyle(document.documentElement).overflowAnchor === "none"` — which
+is what a regression would actually delete, and which fails every time. Caught
+3/3 after the change.
+
+A test that only catches its bug a third of the time reports the same green as
+one that catches it always. The mutation harness is the only reason I knew the
+difference.
+
+---
+
 ## 2026-09-05 — Milestone 9: the library half works, the YouTube half is unrun
 
 **What is done:** a dead row grows a swap control that opens a dialog of

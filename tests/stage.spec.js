@@ -217,6 +217,15 @@ test("scroll anchoring does not drag the jump-to-top back", async ({ page }) => 
    * does not give anchoring enough to work with. */
   test.setTimeout(90_000);
 
+  /* Assert the declaration as well as the behaviour. The behavioural half
+   * below is an unreliable gate: with `overflow-anchor` restored it only
+   * reproduces about one run in three, because whether the compensation fires
+   * depends on scroll timing. Measured over three mutation runs: 1 failed, 2
+   * passed. The declaration is what a regression would actually delete, and
+   * checking it fails every time. */
+  expect(await page.evaluate(() =>
+    getComputedStyle(document.documentElement).overflowAnchor)).toBe("none");
+
   await page.click("#tBottom");
   await page.waitForFunction(() => document.querySelectorAll(".trow").length === 1257,
     null, { timeout: 30_000 });

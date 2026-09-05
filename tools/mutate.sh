@@ -289,5 +289,10 @@ mut 'scroll anchoring is left on' app.css \
   'html { height: 100%; }' \
   tests/stage.spec.js 'scroll anchoring does not drag'
 
+mut 'the sidecar is fetched even with nothing dead' app.js \
+  '    if (!TRACKS.some(isDead)) return;          // nothing to replace' \
+  '    ' \
+  tests/replace.spec.js 'not requested when nothing is dead'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi
