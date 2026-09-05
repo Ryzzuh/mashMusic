@@ -179,7 +179,21 @@
     };
   }
 
+  /* Only ask for the sidecar when it could possibly help.
+   *
+   * A missing file cannot be detected without requesting it — that request IS
+   * the detection — so "don't fetch when it isn't there" is not literally
+   * available. What is available: replacements are only ever consulted for a
+   * dead track, so with nothing dead there is nothing to look up and no reason
+   * to ask. That removes the request, and its 404, from every ordinary page
+   * load. It is attempted at most once per load, and again only when a track
+   * first turns out to be dead. */
+  let sidecarTried = false;
+
   async function mergeReplacements() {
+    if (sidecarTried) return;
+    if (!TRACKS.some(isDead)) return;          // nothing to replace
+    sidecarTried = true;
     try {
       const res = await fetch("data/replacements.json", { cache: "no-store" });
       if (!res.ok) return;
@@ -200,6 +214,8 @@
     const row = rowFor(track.k);
     if (row) decorateRow(row, track);
     paintStatus();
+    // a track dying mid-session is the other moment the sidecar becomes useful
+    if (isDead(track)) mergeReplacements();
   }
 
   async function mergeOfflineLiveness() {
@@ -1937,7 +1953,9 @@
   $("statNote").textContent = "liveness learned from playback";
 
   render(true);
-  mergeOfflineLiveness();
+  // liveness first: it can reveal dead tracks, which is what makes the
+  // replacements sidecar worth asking for at all
+  mergeOfflineLiveness().then(mergeReplacements);
   mergeReplacements();
   loadEqIndex();
   eqResize();
