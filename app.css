@@ -1421,6 +1421,15 @@ main {
 
 /* --------------------------------------- replacement search (QoL 1) */
 
+/* .modal is anchored under the brand because the contributors panel explains
+   the count directly above it. This one is opened from a row far down the
+   list, so it belongs in the middle of the screen. */
+#swapModal {
+  margin: auto;
+  width: min(470px, calc(100vw - 36px));
+}
+#swapModal .swap-note { padding: 0 12px 12px; margin: 0; }
+
 /* shares the last grid cell with the duration, so a live row gains no gap */
 .t-tail { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 
