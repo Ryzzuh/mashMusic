@@ -6,6 +6,63 @@ to undo it.
 
 ---
 
+## 2026-09-05 — Fonts self-hosted; the fidelity gap is closed
+
+Resolves the entry below, which recorded this gap as known and unfixed: every
+geometry assertion in the suite was measured against fallback system fonts,
+because `app.css` imported from `fonts.googleapis.com` and `helpers.js` blocks
+that host to keep runs hermetic.
+
+**Done as a deliberate before/after, because the risk was shifting the very
+geometry the suite pins.** Baseline captured with the real Google-served fonts,
+then re-measured after the move:
+
+    advance widths (8 probes)     identical to 0.01px
+    element geometry (10 boxes)   identical
+    collapse boundaries           685 / 440 before, 685 / 440 after
+
+These are the exact files Google serves, byte for byte — the rendering is not
+"close", it is the same.
+
+**Subsets:** latin and latin-ext only. The library holds 19 distinct non-ASCII
+characters and exactly **one** of them falls outside latin: U+0117, in
+"Downtown Party Network feat Egle Sirvydyte - Space Me Out". So latin-ext earns
+its place for a single track. Cyrillic, Greek and Vietnamese are dropped; the
+one Greek character in the dataset falls back, as does a triangle glyph that
+was never in these families anyway.
+
+**Weight:** 200KB, 12 files. Archivo is a variable font, so one file covers
+both 600 and 700 — the arrangement Google's own CSS uses, and worth 66KB.
+
+**What it buys beyond test fidelity:** the old path was a chain — `@import`
+fetches CSS from googleapis, which then names font files on gstatic. Two
+sequential round trips to two third-party origins before text could render in
+the right face. Now it is same-origin and discovered directly from `app.css`.
+And no visitor announces themselves to Google to read a friend's playlist.
+
+**Reverse:** restore the one-line `@import` at the top of `app.css`, delete the
+`@font-face` block, `assets/fonts/`, and `tests/fonts.spec.js`.
+
+---
+
+## 2026-09-05 — A font test that checked the wrong subset
+
+Worth its own entry because the mutation harness caught it and I would not
+have.
+
+I wrote a test called "latin-ext covers the accented titles" using o-slash,
+a-umlaut and o-umlaut. All three live in U+00C0-00FF, which is Google's
+**latin** subset — so the test would have passed with latin-ext deleted
+entirely. Pointing the latin-ext file at the latin file left it green, which is
+how I found out.
+
+It now tests U+0117, the only character in the library that actually needs the
+subset, and loads that face explicitly: `fonts.load()` defaults to the test
+string "BESbswy", which is pure latin and therefore never pulls a latin-ext
+face at all. Caught after the fix.
+
+---
+
 ## 2026-09-05 — QoL 9 dropped: the draggable artwork modal
 
 **What it was:** open the cover art in a modal the user can drag around the
