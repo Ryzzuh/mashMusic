@@ -353,6 +353,7 @@ button { font: inherit; color: inherit; }
 .search input::placeholder { color: var(--ink-3); }
 
 .switch {
+  position: relative;
   display: inline-flex;
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -454,42 +455,29 @@ button { font: inherit; color: inherit; }
 /* a painter's palette straddling the divider between the two themes */
 .skin-switch { position: relative; }
 
-/* A zero-width button between the two theme buttons: it must not take part in
-   the switch's layout, but it is clickable, so the SVG inside it — which is
-   absolutely positioned and therefore has its own hit box — is the target. */
+/* The palette is the control itself now — an <svg role="button"> floating over
+   the join between the two theme buttons, taking no part in their layout, so
+   they sit end to end with their own divider between them.
+   Its left edge is set from JS: CSS cannot ask where one sibling ends. */
 .skin-badge {
-  position: relative;
-  width: 0;
-  display: grid;
-  place-items: center;
-  z-index: 2;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-}
-/* the shared .switch button rule would give it padding and a border */
-.skin-badge,
-.skin-badge + button { border-left: 0; }
-.skin-badge:hover .pal-body { stroke: var(--accent); }
-.skin-badge:focus-visible { outline: none; }
-.skin-badge:focus-visible .pal-body { stroke: var(--ink); stroke-width: 2; }
-/* the span breaks button + button, so restate the divider it replaced */
-.skin-badge::before {
-  content: "";
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--line);
-}
-.skin-badge svg {
-  position: absolute;
+  top: 50%;
+  left: 0;                       /* placed by placeSkinBadge() */
+  transform: translate(-50%, -50%);
   width: 24px;
   height: 20px;
   overflow: visible;
+  z-index: 2;
+  cursor: pointer;
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .55));
 }
+.skin-badge:hover .pal-body { stroke: var(--accent); }
+/* An <svg tabindex="0"> takes focus on click and Chrome draws its own ring
+   around the whole box, which sits oddly over the join. Suppress it and give
+   keyboard users an indicator drawn in the palette itself. */
+.skin-badge:focus { outline: none; }
+.skin-badge:focus-visible .pal-body { stroke: var(--ink); stroke-width: 2.4; }
+
 .pal-body {
   fill: var(--raised);
   stroke: var(--line-hard);

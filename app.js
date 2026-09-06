@@ -1816,10 +1816,30 @@
      reads as the thing that sits between them — clicking it moves to the other
      profile. It carries the active theme's colours, which is what makes it
      legible as a switch rather than an ornament. */
-  $("skinBadge").addEventListener("click", () => {
+  const skinBadge = $("skinBadge");
+
+  function flipSkin() {
     const current = document.documentElement.dataset.skin;
     setSkin(ALL_SKINS[(ALL_SKINS.indexOf(current) + 1) % ALL_SKINS.length]);
+  }
+  skinBadge.addEventListener("click", flipSkin);
+  // an <svg role="button"> gets none of a real button's keyboard behaviour
+  skinBadge.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flipSkin(); }
   });
+
+  /* Park it over the join. CSS cannot ask where one sibling ends, and the two
+     labels are content-sized, so the join is not at 50% of the switch. It moves
+     when the fonts land and whenever the switch is re-laid out — including when
+     it is collapsed into the tools panel and brought back. */
+  const skinSwitch = document.querySelector(".skin-switch");
+  function placeSkinBadge() {
+    const first = skinSwitch.querySelector("button[data-skin]");
+    if (first) skinBadge.style.left = first.offsetWidth + "px";
+  }
+  new ResizeObserver(placeSkinBadge).observe(skinSwitch);
+  placeSkinBadge();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(placeSkinBadge);
 
   /* --------------------------------------- collapsing stage (QoL 10)
    *
