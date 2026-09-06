@@ -110,9 +110,10 @@ mut 'the overflow panel is laid out in flow' app.css \
   tests/topbar.spec.js 'collapsed theme'
 
 mut 'a widening label never triggers a reflow' app.js \
-  '    reflowTools();
-    render(false);' \
-  '    render(false);' \
+  '    openListMenu(false, true);
+    // "Shown" -> "Obfuscated" widens the pill and moves the collapse boundary' \
+  '    openListMenu(false, true);
+    if (false)' \
   tests/topbar.spec.js 'near a boundary does not overflow'
 
 mut 'focus is not restored after a reflow' app.js \
@@ -279,7 +280,6 @@ mut 'the offline sidecar is fetched but discarded' app.js \
 mut 'a late-rendered row does not mark itself current' app.js \
   '    if (state.current && state.current.k === track.k) {
       li.setAttribute("aria-current", "true");
-      revealRow(li, track);
     }' \
   '    void track;' \
   tests/replace.spec.js 'choosing a replacement plays it'
@@ -334,6 +334,16 @@ mut 'the palette goes back to being decoration' app.css \
   pointer-events: none;
 }' \
   tests/topbar.spec.js 'a real target, not decoration'
+
+mut 'hidden mode stops filtering unavailable tracks' app.js \
+  '      if (state.listMode === "hide" && isSkippable(t)) return false;' \
+  '      if (false && isSkippable(t)) return false;' \
+  tests/behaviour.spec.js 'drops the tracks the platforms have lost'
+
+mut 'obfuscated mode filters too' app.js \
+  '      if (state.listMode === "hide" && isSkippable(t)) return false;' \
+  '      if (state.listMode !== "show" && isSkippable(t)) return false;' \
+  tests/behaviour.spec.js 'still shows every track'
 
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

@@ -23,19 +23,60 @@ test("the SoundCloud slot hides when a YouTube track takes over", async ({ page 
   expect(state.display).toBe("none");        // the attribute must actually win
 });
 
-test("hidden list mode keeps titles out of the DOM entirely", async ({ page }) => {
+test("hidden mode drops the tracks the platforms have lost", async ({ page }) => {
+  /* "Hidden" used to redact titles — replace them with "Track 0042" and keep
+   * the real ones out of the DOM. It now filters instead: the unavailable
+   * tracks leave the list. The predicate lives in buildView(), so the rows,
+   * the counts and autoplay all narrow together. */
   await page.goto("/");
-  await setListMode(page, "hide");
 
-  const leaked = await page.evaluate(() => {
-    const html = document.getElementById("tracklist").innerHTML;
-    return window.MASH_TRACKS.slice(0, 60)
-      .filter((t) => html.includes(t.t) || (t.v && html.includes(t.v))).length;
+  const marked = await page.evaluate(() => {
+    const t = window.MASH_TRACKS, rec = {};
+    [0, 1, 2].forEach((i) => (rec[t[i].k] = { s: "gone", c: 100, t: Date.now() }));
+    rec[t[3].k] = { s: "blocked", c: 150, t: Date.now() };
+    rec[t[4].k] = { s: "stalled", c: null, t: Date.now() };   // counted too
+    localStorage.setItem("mash.liveness.v1", JSON.stringify(rec));
+    return t.slice(0, 5).map((x) => x.k);
   });
-  expect(leaked).toBe(0);
+  await page.reload();
 
-  // and the row still says something useful
-  await expect(page.locator(".trow .t-name").first()).toHaveText(/^Track \d{4}$/);
+  const total = () => page.evaluate(() => {
+    const m = /showing \d+ \/ (\d+)/.exec(document.getElementById("statLoaded").textContent);
+    return m ? Number(m[1]) : null;
+  });
+
+  await expect.poll(total).toBe(1257);
+  await expect(page.locator("#statDead")).toHaveText("5 unavailable");
+
+  await setListMode(page, "hide");
+  await expect.poll(total).toBe(1252);
+  for (const k of marked)
+    expect(await page.evaluate((key) => !document.querySelector(`.trow[data-key="${key}"]`), k),
+      `${k} still listed`).toBe(true);
+  // nothing unavailable is left in the view, so the counter has nothing to say
+  await expect(page.locator("#statDead")).toHaveText("");
+  await expect(page.locator(".trow.is-dead, .trow.is-suspect")).toHaveCount(0);
+
+  await setListMode(page, "show");
+  await expect.poll(total).toBe(1257);
+  await expect(page.locator("#statDead")).toHaveText("5 unavailable");
+});
+
+test("obfuscated mode still shows every track, including the dead ones", async ({ page }) => {
+  // the two modes are on different axes now: one filters, one only restyles
+  await page.goto("/");
+  await page.evaluate(() => {
+    const t = window.MASH_TRACKS;
+    localStorage.setItem("mash.liveness.v1",
+      JSON.stringify({ [t[0].k]: { s: "gone", c: 100, t: Date.now() } }));
+  });
+  await page.reload();
+
+  await setListMode(page, "blur");
+  await expect(page.locator(".tracklist")).toHaveClass(/mode-blur/);
+  await expect(page.locator("#statDead")).toHaveText("1 unavailable");
+  expect(await page.evaluate(() =>
+    getComputedStyle(document.querySelector(".trow .t-name")).filter)).toMatch(/pixelate|blur/);
 });
 
 test("shuffling and unshuffling restores the canonical order exactly", async ({ page }) => {

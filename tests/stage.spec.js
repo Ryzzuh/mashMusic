@@ -7,6 +7,18 @@ import { blockExternal, isHittable } from "./helpers.js";
 test.beforeEach(async ({ page }) => {
   await blockExternal(page);
   await page.goto("/");
+  /* Wait for the stage to have a real height before measuring anything.
+   *
+   * .stage-side is `height: 0; min-height: 100%`, so every row in it — the
+   * now-playing text and the artwork/spectrum strip — is sized from the video
+   * box's 16:9 height. Measure before that resolves and the strip is short,
+   * which reads as a 165px gap to the scrubber rather than 33. That is a race
+   * at load, not a defect, and it is why this file's assertions have to start
+   * from a settled layout. */
+  await page.waitForFunction(
+    () => document.querySelector(".stage-media")?.getBoundingClientRect().height > 100,
+    null, { timeout: 10_000 });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 });
 
 const settle = (page) =>
@@ -42,8 +54,12 @@ test("the stage collapses when the list is scrolled and comes back at the top", 
   await settle(page);
   const mid = await geo(page);
   expect(mid.collapsed).toBe(true);
-  expect(Math.round(mid.media.width)).toBeLessThan(20);   // column closed
-  expect(mid.pinned.height).toBeLessThan(before.pinned.height - 150);
+  /* The class lands immediately but the column closes over 0.3s, so poll for
+     the animation rather than assert one frame after the scroll. */
+  await expect.poll(async () => Math.round((await geo(page)).media.width),
+    { message: "the video column never finished closing" }).toBeLessThan(20);
+  await expect.poll(async () => (await geo(page)).pinned.height)
+    .toBeLessThan(before.pinned.height - 150);
 
   await page.evaluate(() => window.scrollTo(0, 0));
   await settle(page);
@@ -54,13 +70,18 @@ test("the gap from the artwork to the scrubber survives the collapse", async ({ 
   /* The spec's one hard number. Keeping the stage and the scrubber in a single
    * sticky wrapper is what makes it hold: the gap stays ordinary flow spacing
    * rather than something that has to be recomputed. */
-  expect((await geo(page)).gapToScrub).toBe(33);
+  /* Poll rather than assert once. The whole side column is sized from the
+     video box's 16:9 height, and until that resolves the strip is short — which
+     reads as a 165px gap instead of 33. Waiting for .stage-media to have a
+     height was not enough on its own; the settled gap is the thing this test
+     is actually about. */
+  await expect.poll(async () => (await geo(page)).gapToScrub,
+    { message: "the expanded gap never settled" }).toBe(33);
 
   await page.evaluate(() => window.scrollTo(0, 900));
-  await settle(page);
-  const m = await geo(page);
-  expect(m.collapsed).toBe(true);
-  expect(m.gapToScrub).toBe(33);
+  await expect.poll(async () => (await geo(page)).collapsed).toBe(true);
+  await expect.poll(async () => (await geo(page)).gapToScrub,
+    { message: "the collapsed gap never settled" }).toBe(33);
 });
 
 test("the pinned unit never scrolls past the top bar", async ({ page }) => {

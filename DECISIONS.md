@@ -6,6 +6,63 @@ to undo it.
 
 ---
 
+## 2026-09-06 — HIDDEN now filters unavailable tracks, and what that cost
+
+**Asked for:** "change the functionality of HIDDEN to filter tracks
+Unavailable."
+
+**Done.** `hide` drops every track the platforms have lost — the same set the
+status bar counts as unavailable, which is `isSkippable`: gone, blocked, *and*
+stalled. The predicate went into `buildView()` beside search, favourites,
+contributors, sources and played, so the rows, the counts, autoplay and the
+wheel all narrow together.
+
+**What it cost, and you should know this.** `hide` used to keep titles out of
+the DOM entirely — real text replaced with "Track 0042" — so they survived
+devtools and select-all. That was a genuine privacy capability, not a visual
+effect, and it is now gone. `blur` remains, but it is cosmetic by design: the
+real titles are in the document, just pixelated. If shoulder-surfing was the
+point, nothing here does that any more.
+
+**A design smell worth naming:** the three options now sit on two different
+axes. SHOWN and OBFUSCATED change how titles *read*; HIDDEN changes which
+tracks are *present*. One control, two jobs. It works and it is what was asked
+for, but "Track list visibility" is no longer an accurate label for the group,
+and a separate "hide unavailable" toggle would be the cleaner shape if this
+ever grows a fourth option.
+
+**Kept:** the label "Hidden", since that is what you called it. The menu item
+carries a title explaining what it hides. Renaming it to something explicit is
+a one-line change if you would rather.
+
+**Reverse:** restore the redaction branch in `buildRow`, the `revealRow`
+helper, the `.t-name.is-redacted` style, and drop the predicate line from
+`buildView()`.
+
+---
+
+## 2026-09-06 — Three stage tests were measuring before the layout settled
+
+Not caused by the HIDDEN change, but surfaced by re-running the suite around
+it, and one of them I had previously misdiagnosed.
+
+`.stage-side` is `height: 0; min-height: 100%`, so every row inside it is
+sized from the video box's 16:9 height. Measure before that resolves and the
+artwork/spectrum strip is short, which reads as a **165px** gap to the scrubber
+instead of 33. Separately, the collapse animates over 0.3s, so asserting the
+video column is closed one frame after the scroll caught it still 596px wide.
+
+All three now poll for the settled value. Four consecutive runs of the file and
+two consecutive full-suite runs, clean.
+
+**The correction:** I previously blamed a 165px reading on a leaked mutation
+having corrupted the working tree. The corruption was real and did happen — but
+it was not the cause of this. The tree was clean this time and the same number
+came back. A plausible explanation for a symptom is not the same as the cause,
+and I stopped at the first one that fit.
+
+---
+
 ## 2026-09-06 — The list-mode picker hid the mode you needed most
 
 **The bug, as reported:** switch from Shown to Obfuscated and "Shown

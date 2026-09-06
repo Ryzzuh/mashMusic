@@ -992,7 +992,6 @@ main {
 .tracklist.mode-blur .trow[aria-current="true"] .t-via { filter: none; }
 
 /* Hidden: titles never reach the DOM at all — see buildRow(). */
-.t-name.is-redacted { color: var(--ink-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px; }
 
 .sentinel { height: 8px; }
 

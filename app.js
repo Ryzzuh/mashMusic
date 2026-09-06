@@ -255,6 +255,9 @@
     const q = state.query.trim().toLowerCase();
     state.view = TRACKS.filter((t) => {
       if (played.has(t.k)) return false;
+      // "hide" no longer redacts titles; it drops the tracks the platforms
+      // have lost — the same set the status bar counts as unavailable
+      if (state.listMode === "hide" && isSkippable(t)) return false;
       if (state.favsOnly && !favs.has(t.k)) return false;
       if (!everyoneSelected() && !who.has(contributorOf(t))) return false;
       if (!sources.has(t.s)) return false;
@@ -319,16 +322,8 @@
     const via = document.createElement("span");
     via.className = "t-via";
 
-    // "hide" keeps the title out of the document entirely, so it survives
-    // devtools and select-all. "blur" is cosmetic by design.
-    if (state.listMode === "hide") {
-      name.classList.add("is-redacted");
-      name.textContent = "Track " + String(track.n).padStart(4, "0");
-      via.textContent = "";
-    } else {
-      name.textContent = track.t;
-      via.textContent = track.v ? "via " + track.v : "";
-    }
+    name.textContent = track.t;
+    via.textContent = track.v ? "via " + track.v : "";
     main.append(name, via);
 
     const src = document.createElement("span");
@@ -371,7 +366,6 @@
      * one — left the list with nothing highlighted even after scrolling to it. */
     if (state.current && state.current.k === track.k) {
       li.setAttribute("aria-current", "true");
-      revealRow(li, track);
     }
 
     decorateRow(li, track);
@@ -390,15 +384,6 @@
     li.title = dead
       ? "Unavailable — " + (rec.s === "blocked" ? "embedding disabled" : "removed or private")
       : rec?.s === "stalled" ? "Did not start last time — click to retry" : "";
-  }
-
-  function revealRow(li, track) {
-    if (state.listMode !== "hide") return;
-    const name = li.querySelector(".t-name");
-    const via = li.querySelector(".t-via");
-    name.classList.remove("is-redacted");
-    name.textContent = track.t;
-    via.textContent = track.v ? "via " + track.v : "";
   }
 
   let bulkRender = false;
@@ -664,7 +649,6 @@
     const row = rowFor(track.k);
     if (row) {
       row.setAttribute("aria-current", "true");
-      revealRow(row, track);
     }
   }
 
@@ -1775,6 +1759,13 @@
     // by ~37px. The ResizeObserver watches .topbar, whose size never changes,
     // so nothing else would notice until the next window resize.
     reflowTools();
+    /* "hide" changes which tracks are in the view, so it has to be rebuilt —
+       but keep the reader's scroll depth, which a plain render(true) discards.
+       buildView() zeroes state.shown; render(false) reads it back as the depth
+       to render to, so it is restored in between. */
+    const depth = state.shown;
+    buildView();
+    state.shown = depth;
     render(false);
   }
 
