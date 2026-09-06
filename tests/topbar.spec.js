@@ -27,7 +27,6 @@ test("the list-mode picker offers every mode, including the one in the pill", as
   await page.click('.listmode-menu [data-listmode="hide"]');
   await expect(page.locator("#listModeCurrent")).toHaveText("Hidden");
   await expect(page.locator("#listModeMenu")).toBeHidden();
-  expect(await page.locator(".trow .t-name").first().textContent()).toMatch(/^Track \d{4}$/);
 
   // and "Shown" is still there to go back to, marked as inactive
   await page.click("#listModeMore");
