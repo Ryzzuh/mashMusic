@@ -321,19 +321,21 @@ mut 'the picker drops the mode you are already in' index.html \
   tests/topbar.spec.js 'offers every mode'
 
 mut 'the palette does nothing when clicked' app.js \
-  '  $("skinBadge").addEventListener("click", () => {' \
-  '  $("skinBadge").addEventListener("noop", () => {' \
+  '  skinBadge.addEventListener("click", flipSkin);' \
+  '  skinBadge.addEventListener("noop", flipSkin);' \
   tests/topbar.spec.js 'switches between the two profiles'
 
 mut 'the palette goes back to being decoration' app.css \
-  '  background: none;
-  cursor: pointer;
-}' \
-  '  background: none;
-  cursor: pointer;
-  pointer-events: none;
-}' \
+  '  cursor: pointer;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .55));' \
+  '  cursor: pointer;
+  pointer-events: none;' \
   tests/topbar.spec.js 'a real target, not decoration'
+
+mut 'the palette is not placed over the join' app.js \
+  '    if (first) skinBadge.style.left = first.offsetWidth + "px";' \
+  '    if (first) skinBadge.style.left = "0px";' \
+  tests/topbar.spec.js 'badge sits on the divider'
 
 mut 'hidden mode stops filtering unavailable tracks' app.js \
   '      if (state.listMode === "hide" && isSkippable(t)) return false;' \
@@ -344,6 +346,11 @@ mut 'obfuscated mode filters too' app.js \
   '      if (state.listMode === "hide" && isSkippable(t)) return false;' \
   '      if (state.listMode !== "show" && isSkippable(t)) return false;' \
   tests/behaviour.spec.js 'still shows every track'
+
+mut 'the palette loses its keyboard handler' app.js \
+  '    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flipSkin(); }' \
+  '    void e;' \
+  tests/topbar.spec.js 'responds to the keyboard'
 
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

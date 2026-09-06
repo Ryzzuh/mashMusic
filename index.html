@@ -69,9 +69,10 @@
 
     <div class="switch skin-switch" role="group" aria-label="Theme">
       <button data-skin="jukebox" aria-pressed="true">Jukebox</button>
-      <button class="skin-badge" id="skinBadge" type="button"
-              title="Switch theme" aria-label="Switch theme">
-        <svg viewBox="0 0 32 26" aria-hidden="true">
+      <button data-skin="night" aria-pressed="false">Night Dial</button>
+      <svg class="skin-badge" id="skinBadge" viewBox="0 0 32 26"
+           role="button" tabindex="0" aria-label="Switch theme">
+        <title>Switch theme</title>
           <defs>
             <mask id="skinPaletteHole">
               <rect width="32" height="26" fill="#fff"></rect>
@@ -83,9 +84,7 @@
           <circle class="pal-drop pal-a" cx="9"  cy="8" r="2.5"></circle>
           <circle class="pal-drop pal-b" cx="16" cy="6" r="2.5"></circle>
           <circle class="pal-drop pal-c" cx="23" cy="8" r="2.5"></circle>
-        </svg>
-      </button>
-      <button data-skin="night" aria-pressed="false">Night Dial</button>
+      </svg>
     </div>
 
     <button class="tools-more" id="toolsMore" hidden type="button"

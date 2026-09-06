@@ -118,7 +118,7 @@ test("the palette is a real target, not decoration", async ({ page }) => {
    * palette's centre has to BE the palette. */
   const hit = await page.evaluate(() => {
     const el = document.getElementById("skinBadge");
-    const r = el.querySelector("svg").getBoundingClientRect();
+    const r = el.getBoundingClientRect();          // #skinBadge is the svg now
     const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return {
       insideBadge: !!top && el.contains(top),
@@ -127,19 +127,46 @@ test("the palette is a real target, not decoration", async ({ page }) => {
   });
   expect(hit.insideBadge, `a click there lands on ${hit.landedOn}`).toBe(true);
 
+  /* The palette is 24x20 — under WCAG 2.5.8's 24x24. That is allowed here by
+     the criterion's own "Equivalent" exception: the same function is available
+     from another control on the same page that does meet the bar. So assert
+     the exception actually holds, rather than waving it through. */
   const box = await page.locator("#skinBadge").boundingBox();
-  expect(box.width).toBeGreaterThanOrEqual(24);
-  expect(box.height).toBeGreaterThanOrEqual(24);
+  expect(box.width).toBeGreaterThan(0);
+  for (const skin of ["jukebox", "night"]) {
+    const b = await page.locator(`button[data-skin="${skin}"]`).boundingBox();
+    expect(b.width, `${skin} is the equivalent control`).toBeGreaterThanOrEqual(24);
+    expect(b.height, `${skin} is the equivalent control`).toBeGreaterThanOrEqual(24);
+  }
+  // and they must genuinely do the same job
+  await page.click('button[data-skin="night"]');
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.skin)).toBe("night");
+  await page.click('button[data-skin="jukebox"]');
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.skin)).toBe("jukebox");
 
   // a focusable control must not be hidden from assistive tech
   const a11y = await page.evaluate(() => {
     const el = document.getElementById("skinBadge");
-    return { tag: el.tagName, ariaHidden: el.getAttribute("aria-hidden"),
+    return { tag: el.tagName.toLowerCase(), role: el.getAttribute("role"),
+             tabindex: el.getAttribute("tabindex"),
+             ariaHidden: el.getAttribute("aria-hidden"),
              label: el.getAttribute("aria-label") };
   });
-  expect(a11y.tag).toBe("BUTTON");
+  // the wrapping <button> is gone; the SVG is the control
+  expect(a11y.tag).toBe("svg");
+  expect(a11y.role).toBe("button");
+  expect(a11y.tabindex).toBe("0");
   expect(a11y.ariaHidden).toBeNull();
   expect(a11y.label).toBeTruthy();
+});
+
+test("the palette responds to the keyboard", async ({ page }) => {
+  // an <svg role="button"> gets none of a real button's activation behaviour
+  await page.evaluate(() => document.getElementById("skinBadge").focus());
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.skin)).toBe("night");
+  await page.keyboard.press(" ");
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.skin)).toBe("jukebox");
 });
 
 test("the palette choice persists like the buttons do", async ({ page }) => {
@@ -152,7 +179,7 @@ test("the palette choice persists like the buttons do", async ({ page }) => {
 test("the badge sits on the divider between the two theme buttons", async ({ page }) => {
   const geo = await page.evaluate(() => {
     const r = (s) => document.querySelector(s).getBoundingClientRect();
-    const juke = r('button[data-skin="jukebox"]'), badge = r(".skin-badge svg"), night = r('button[data-skin="night"]');
+    const juke = r('button[data-skin="jukebox"]'), badge = r("#skinBadge"), night = r('button[data-skin="night"]');
     return {
       badgeCentre: badge.left + badge.width / 2,
       divider: (juke.right + night.left) / 2,
@@ -178,21 +205,28 @@ test("starting the next track does not move the view", async ({ page }) => {
   expect(await page.evaluate(() => window.scrollY)).toBe(before);
 });
 
-test("the theme divider does not escape the control", async ({ page }) => {
-  // the badge span stretches to full control height, so a -17px inset made this
-  // 68px tall and it only looked right because an ancestor clipped it
+test("the two theme buttons meet end to end, with the palette over the join", async ({ page }) => {
+  /* The palette used to be a zero-width element between them, restating the
+     divider with a ::before because a span breaks `button + button`. It is
+     absolutely positioned now and out of the flow entirely, so the buttons are
+     adjacent siblings with the switch's own divider between them. */
   const g = await page.evaluate(() => {
     const sw = document.querySelector(".skin-switch").getBoundingClientRect();
-    const el = document.querySelector(".skin-badge");
-    const d = getComputedStyle(el, "::before");
-    const r = el.getBoundingClientRect();
-    return { switchTop: sw.top, switchBottom: sw.bottom, badgeTop: r.top, badgeBottom: r.bottom,
-             insetTop: d.top, insetBottom: d.bottom };
+    const juke = document.querySelector('button[data-skin="jukebox"]').getBoundingClientRect();
+    const night = document.querySelector('button[data-skin="night"]').getBoundingClientRect();
+    const badge = document.getElementById("skinBadge").getBoundingClientRect();
+    return {
+      gapBetweenButtons: Math.abs(juke.right - night.left),
+      dividerWidth: getComputedStyle(document.querySelector('button[data-skin="night"]')).borderLeftWidth,
+      badgeTop: badge.top, badgeBottom: badge.bottom,
+      switchTop: sw.top, switchBottom: sw.bottom,
+    };
   });
+  expect(g.gapBetweenButtons).toBeLessThan(0.6);        // touching
+  expect(g.dividerWidth).toBe("1px");                   // and still divided
+  // and the palette stays inside the control it floats over
   expect(g.badgeTop).toBeGreaterThanOrEqual(g.switchTop - 1);
   expect(g.badgeBottom).toBeLessThanOrEqual(g.switchBottom + 1);
-  expect(g.insetTop).toBe("0px");
-  expect(g.insetBottom).toBe("0px");
 });
 
 test("an open picker owns the keyboard", async ({ page }) => {

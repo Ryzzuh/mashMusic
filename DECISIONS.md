@@ -6,6 +6,55 @@ to undo it.
 
 ---
 
+## 2026-09-07 — The palette is the control; the wrapper is gone
+
+**Asked for:** the SVG itself clickable rather than a wrapping element, the
+`.skin-badge` button removed, the palette floating over the join, and the two
+theme buttons touching end to end.
+
+**Done.** `#skinBadge` is now an `<svg role="button" tabindex="0">`, absolutely
+positioned and out of the flow entirely, so JUKEBOX and NIGHT DIAL are adjacent
+siblings with the switch's own `button + button` divider between them. The
+`::before` that used to restate that divider is gone, along with the
+`border-left: 0` overrides that existed only because a wrapper broke the
+adjacency.
+
+**Positioned from JS, deliberately.** The two labels are content-sized, so the
+join is not at 50% of the switch, and CSS cannot ask where one sibling ends.
+`placeSkinBadge()` sets `left` from the first button's width, under a
+ResizeObserver and again after the fonts land. Measured: buttons meet at
+983.5px with no gap, palette centred on it.
+
+**An `<svg role="button">` gets no keyboard behaviour for free**, so there is
+an explicit Enter/Space handler and a mutation check that deletes it.
+
+**Focus ring:** an SVG with `tabindex` takes focus on click and Chrome draws
+its own ring around the whole box, which sat badly over the join. Suppressed on
+`:focus`, with a keyboard-only indicator drawn in the palette's own stroke on
+`:focus-visible`. Verified both: no ring on click, clear ring on Tab.
+
+---
+
+## 2026-09-07 — The palette is 24x20, and that is allowed
+
+The wrapper used to be 25x34, clearing WCAG 2.5.8's 24x24 minimum. The bare SVG
+is **24x20**, which does not.
+
+**Chosen: keep it, under the criterion's own "Equivalent" exception** — the
+same function is available from another control on the same page that does meet
+the bar. Both theme buttons are 34px tall and set the theme directly.
+
+The test asserts the exception actually holds rather than waving it through: it
+measures both buttons *and* clicks each to confirm they really do the same job.
+If either ever stopped setting the theme, the palette would be an undersized
+target with no equivalent, and the test would say so.
+
+The alternative was resizing the artwork to 26x24, which changes the look that
+was just approved. Reversible in one line if you would rather have the size
+than the exception.
+
+---
+
 ## 2026-09-06 — HIDDEN now filters unavailable tracks, and what that cost
 
 **Asked for:** "change the functionality of HIDDEN to filter tracks
