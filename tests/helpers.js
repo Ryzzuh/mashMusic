@@ -99,10 +99,8 @@ export function isHittable(page, selector) {
 
 /** Set the list-visibility mode through the picker UI. */
 export async function setListMode(page, mode) {
-  if (mode === "show") {
-    await page.click("#listModeCurrent");
-    return;
-  }
+  // every mode is in the menu now, including "show" — the pill used to be a
+  // shortcut back to plain titles and is a menu toggle like the caret
   await page.click("#listModeMore");
   await page.click(`.listmode-menu [data-listmode="${mode}"]`);
 }

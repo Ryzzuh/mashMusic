@@ -454,14 +454,26 @@ button { font: inherit; color: inherit; }
 /* a painter's palette straddling the divider between the two themes */
 .skin-switch { position: relative; }
 
+/* A zero-width button between the two theme buttons: it must not take part in
+   the switch's layout, but it is clickable, so the SVG inside it — which is
+   absolutely positioned and therefore has its own hit box — is the target. */
 .skin-badge {
   position: relative;
   width: 0;
   display: grid;
   place-items: center;
   z-index: 2;
-  pointer-events: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
 }
+/* the shared .switch button rule would give it padding and a border */
+.skin-badge,
+.skin-badge + button { border-left: 0; }
+.skin-badge:hover .pal-body { stroke: var(--accent); }
+.skin-badge:focus-visible { outline: none; }
+.skin-badge:focus-visible .pal-body { stroke: var(--ink); stroke-width: 2; }
 /* the span breaks button + button, so restate the divider it replaced */
 .skin-badge::before {
   content: "";

@@ -54,13 +54,14 @@
     </label>
 
     <div class="listmode" role="group" aria-label="Track list visibility">
-      <button class="listmode-current" id="listModeCurrent" data-listmode="show"
-              title="Back to plain titles">Shown</button>
+      <button class="listmode-current" id="listModeCurrent" aria-controls="listModeMenu"
+              aria-expanded="false" title="Change how titles are shown">Shown</button>
       <button class="listmode-more" id="listModeMore" aria-controls="listModeMenu"
-              aria-expanded="false" aria-label="Obfuscate or hide titles">
+              aria-expanded="false" aria-label="Change how titles are shown">
         <svg aria-hidden="true"><use href="#i-caret"></use></svg>
       </button>
       <div class="listmode-menu" id="listModeMenu" hidden>
+        <button data-listmode="show">Shown</button>
         <button data-listmode="blur">Obfuscated</button>
         <button data-listmode="hide">Hidden</button>
       </div>
@@ -68,8 +69,9 @@
 
     <div class="switch skin-switch" role="group" aria-label="Theme">
       <button data-skin="jukebox" aria-pressed="true">Jukebox</button>
-      <span class="skin-badge" aria-hidden="true">
-        <svg viewBox="0 0 32 26">
+      <button class="skin-badge" id="skinBadge" type="button"
+              title="Switch theme" aria-label="Switch theme">
+        <svg viewBox="0 0 32 26" aria-hidden="true">
           <defs>
             <mask id="skinPaletteHole">
               <rect width="32" height="26" fill="#fff"></rect>
@@ -82,7 +84,7 @@
           <circle class="pal-drop pal-b" cx="16" cy="6" r="2.5"></circle>
           <circle class="pal-drop pal-c" cx="23" cy="8" r="2.5"></circle>
         </svg>
-      </span>
+      </button>
       <button data-skin="night" aria-pressed="false">Night Dial</button>
     </div>
 

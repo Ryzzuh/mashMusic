@@ -6,6 +6,73 @@ to undo it.
 
 ---
 
+## 2026-09-06 — The list-mode picker hid the mode you needed most
+
+**The bug, as reported:** switch from Shown to Obfuscated and "Shown
+disappears altogether."
+
+**Exactly right.** The menu only ever listed the two modes you were *not* in.
+Leaving Shown removed it from the interface entirely; the only way back was
+clicking the pill, an affordance advertised by nothing but a `title`
+attribute. That was milestone 1's T1 — "collapse to SHOWN plus a narrow picker
+for Obfuscated/Hidden" — implemented literally, and it reads as broken because
+a control that names the current state should let you leave it the same way you
+arrived.
+
+**Chosen:** the menu lists all three with the active one marked
+`aria-current`, and both halves of the control — pill and caret — open it, like
+any other dropdown. The pill's title no longer promises a shortcut it does not
+have.
+
+**Reverse:** drop the `show` entry from `#listModeMenu` and point
+`#listModeCurrent` back at `setListMode("show")`.
+
+---
+
+## 2026-09-06 — The palette badge is now the switch
+
+**Chosen:** the palette between the two theme buttons toggles between them. It
+already straddled the divider and already carried the active theme's colours,
+which is what makes it legible as a switch rather than an ornament — it was
+just `pointer-events: none`.
+
+It is a zero-width `<button>` so the switch's layout is unchanged; the SVG
+inside it is absolutely positioned and provides the 25x34 hit box. The shared
+`.switch button` rules had to be neutralised for it, and the `button + button`
+divider suppressed, since the span it replaced was what broke that adjacency.
+
+**Reverse:** back to a `<span aria-hidden="true">` with `pointer-events: none`,
+and delete the `#skinBadge` handler.
+
+---
+
+## 2026-09-06 — isHittable() accepts a hit on an ancestor
+
+**Found by a mutation, and it affects 20 assertions across 6 files.**
+
+`isHittable()` is the suite's guard against controls that look present but
+cannot be clicked — added after the list-mode menu shipped invisible. It
+returns ok when the topmost element at the centre point is the element, is
+*inside* it, **or contains it**.
+
+That last clause is the problem. When a control is genuinely unclickable,
+`elementFromPoint` returns the ancestor behind it — and `hit.contains(el)` is
+then true. Restoring `pointer-events: none` on the palette left the assertion
+green, with the click landing on `DIV.switch skin-switch`.
+
+**Chosen for now:** a strict, local check in the palette test — the topmost
+element at that point must *be* the badge or inside it. The failure message
+names what it hit instead, which is how this was diagnosed.
+
+**Not done:** tightening `isHittable()` itself. The clause is presumably there
+for wrappers that visually are the element, and 20 assertions depend on the
+current behaviour; changing it deserves its own pass with each call site
+checked, not a late-night edit. **Worth doing** — a guard that can pass for an
+unclickable element is weaker than it looks, and this suite has been bitten by
+invisible controls twice already.
+
+---
+
 ## 2026-09-06 — The envelopes stay publicly served, knowingly
 
 **Checked, because "make the eq repo private" turned out to be already true.**

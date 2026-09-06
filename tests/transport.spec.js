@@ -168,6 +168,10 @@ test("an active source filter is visible even where the flanks are hidden", asyn
 });
 
 test("the readouts count from the playing track's position", async ({ page }) => {
+  // ~13s alone: two row clicks, each auto-scrolled to and each waiting on the
+  // readout to repaint. That sits close enough to the 30s default to time out
+  // under full-suite load, which is a budget problem, not a behaviour one.
+  test.setTimeout(60_000);
   const tracksLeft = () =>
     page.evaluate(() => Number(document.getElementById("mTracksLeft").textContent));
 

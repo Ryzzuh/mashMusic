@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("the list-mode control shows one mode and hides the rest behind a picker", async ({ page }) => {
+test("the list-mode picker offers every mode, including the one in the pill", async ({ page }) => {
   await expect(page.locator("#listModeCurrent")).toHaveText("Shown");
   await expect(page.locator("#listModeMenu")).toBeHidden();
 
@@ -16,16 +16,35 @@ test("the list-mode control shows one mode and hides the rest behind a picker", 
   // an overflow:hidden container and was invisible while passing that check
   expect(await isHittable(page, "#listModeMenu")).toMatchObject({ ok: true });
   expect(await isHittable(page, '.listmode-menu [data-listmode="hide"]')).toMatchObject({ ok: true });
-  await expect(page.locator(".listmode-menu button")).toHaveCount(2);
+
+  /* All three, with the active one marked. The menu used to list only the two
+   * you were not in, so leaving "Shown" removed it from the interface: the
+   * only way back was clicking the pill, an affordance advertised by nothing
+   * but a title attribute. */
+  await expect(page.locator(".listmode-menu button")).toHaveCount(3);
+  await expect(page.locator('.listmode-menu [data-listmode="show"]')).toHaveAttribute("aria-current", "true");
 
   await page.click('.listmode-menu [data-listmode="hide"]');
   await expect(page.locator("#listModeCurrent")).toHaveText("Hidden");
   await expect(page.locator("#listModeMenu")).toBeHidden();
   expect(await page.locator(".trow .t-name").first().textContent()).toMatch(/^Track \d{4}$/);
 
-  // the visible pill is the way back to plain titles
-  await page.click("#listModeCurrent");
+  // and "Shown" is still there to go back to, marked as inactive
+  await page.click("#listModeMore");
+  await expect(page.locator('.listmode-menu [data-listmode="hide"]')).toHaveAttribute("aria-current", "true");
+  await expect(page.locator('.listmode-menu [data-listmode="show"]')).toHaveAttribute("aria-current", "false");
+  await page.click('.listmode-menu [data-listmode="show"]');
   await expect(page.locator("#listModeCurrent")).toHaveText("Shown");
+});
+
+test("either half of the control opens the picker", async ({ page }) => {
+  for (const sel of ["#listModeCurrent", "#listModeMore"]) {
+    await page.click(sel);
+    await expect(page.locator("#listModeMenu")).toBeVisible();
+    await expect(page.locator(sel)).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#listModeMenu")).toBeHidden();
+  }
 });
 
 test("the picker closes on Escape and on an outside click", async ({ page }) => {
@@ -73,6 +92,62 @@ test("the palette badge carries three colours from the active theme", async ({ p
   const night = await read();
   expect(night.drops).toEqual(night.tokens);
   expect(night.drops).not.toEqual(juke.drops);      // it actually changed
+});
+
+test("the palette switches between the two profiles", async ({ page }) => {
+  /* It straddles the divider between the two theme buttons and carries the
+     active theme's colours, so it reads as the thing that sits between them.
+     It used to be pointer-events:none decoration. */
+  const skin = () => page.evaluate(() => document.documentElement.dataset.skin);
+  expect(await skin()).toBe("jukebox");
+
+  await page.click("#skinBadge");
+  await expect.poll(skin).toBe("night");
+  await expect(page.locator('button[data-skin="night"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('button[data-skin="jukebox"]')).toHaveAttribute("aria-pressed", "false");
+
+  await page.click("#skinBadge");                       // and back again
+  await expect.poll(skin).toBe("jukebox");
+  await expect(page.locator('button[data-skin="jukebox"]')).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the palette is a real target, not decoration", async ({ page }) => {
+  /* isHittable() is not strict enough for this one. It accepts a hit on an
+   * ancestor (`hit.contains(el)`), and an unclickable control is exactly the
+   * case where elementFromPoint returns the ancestor behind it — so restoring
+   * pointer-events:none left that assertion green. The topmost element at the
+   * palette's centre has to BE the palette. */
+  const hit = await page.evaluate(() => {
+    const el = document.getElementById("skinBadge");
+    const r = el.querySelector("svg").getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return {
+      insideBadge: !!top && el.contains(top),
+      landedOn: top ? (top.id || `${top.tagName}.${top.getAttribute("class") || ""}`) : "nothing",
+    };
+  });
+  expect(hit.insideBadge, `a click there lands on ${hit.landedOn}`).toBe(true);
+
+  const box = await page.locator("#skinBadge").boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(24);
+  expect(box.height).toBeGreaterThanOrEqual(24);
+
+  // a focusable control must not be hidden from assistive tech
+  const a11y = await page.evaluate(() => {
+    const el = document.getElementById("skinBadge");
+    return { tag: el.tagName, ariaHidden: el.getAttribute("aria-hidden"),
+             label: el.getAttribute("aria-label") };
+  });
+  expect(a11y.tag).toBe("BUTTON");
+  expect(a11y.ariaHidden).toBeNull();
+  expect(a11y.label).toBeTruthy();
+});
+
+test("the palette choice persists like the buttons do", async ({ page }) => {
+  await page.click("#skinBadge");
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.skin)).toBe("night");
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.skin)).toBe("night");
 });
 
 test("the badge sits on the divider between the two theme buttons", async ({ page }) => {
@@ -150,7 +225,7 @@ test("the pill is highlighted only when a non-default mode is active", async ({ 
   expect(await active()).toBe(false);
   await setListMode(page, "hide");
   expect(await active()).toBe(true);
-  await page.click("#listModeCurrent");
+  await setListMode(page, "show");
   expect(await active()).toBe(false);
 });
 
@@ -260,7 +335,8 @@ test("changing the list mode near a boundary does not overflow", async ({ page }
       docOverflow: 0, barOverflow: 0, h: 59,
     });
 
-    await page.click("#listModeCurrent");     // back to Shown
+    await page.click("#listModeMore");        // back to Shown
+    await page.click('#listModeMenu button[data-listmode="show"]');
     await settle(page);
   }
 });

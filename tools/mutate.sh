@@ -312,5 +312,28 @@ mut 'the latin-ext subset is dropped' app.css \
   "  src: url('assets/fonts/barlow-400-latin.woff2') format('woff2');" \
   tests/fonts.spec.js 'latin-ext covers the one title'
 
+# ------------------------------------------------ list-mode picker + palette
+
+mut 'the picker drops the mode you are already in' index.html \
+  '        <button data-listmode="show">Shown</button>
+' \
+  '' \
+  tests/topbar.spec.js 'offers every mode'
+
+mut 'the palette does nothing when clicked' app.js \
+  '  $("skinBadge").addEventListener("click", () => {' \
+  '  $("skinBadge").addEventListener("noop", () => {' \
+  tests/topbar.spec.js 'switches between the two profiles'
+
+mut 'the palette goes back to being decoration' app.css \
+  '  background: none;
+  cursor: pointer;
+}' \
+  '  background: none;
+  cursor: pointer;
+  pointer-events: none;
+}' \
+  tests/topbar.spec.js 'a real target, not decoration'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi
