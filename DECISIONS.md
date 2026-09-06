@@ -6,6 +6,47 @@ to undo it.
 
 ---
 
+## 2026-09-06 — The envelopes stay publicly served, knowingly
+
+**Checked, because "make the eq repo private" turned out to be already true.**
+`Ryzzuh/mashMusic-eq` is private: unauthenticated, both the repo page and the
+API return 404. That hides the source and changes nothing about the data.
+
+GitHub Pages serves publicly even from a private repo — access-controlled Pages
+needs Enterprise Cloud. Measured without credentials:
+
+    github.com/Ryzzuh/mashMusic-eq          404
+    api.github.com/repos/Ryzzuh/mashMusic-eq 404
+    ryzzuh.github.io/mashMusic-eq/index.json 200   11.7 KB
+    ryzzuh.github.io/mashMusic-eq/2452062.bin 200  143 KB
+
+`index.json` lists all 874 ids, so the envelopes are not merely reachable, they
+are enumerable.
+
+**The structural point:** a public static site cannot fetch private data
+without exposing it — any credential the page holds is readable by whoever
+loads the page. So the choice was the spectrum working for visitors, or the
+envelopes not being publicly fetchable. Not both.
+
+**Chosen (Rhys, asked directly): leave as is.** The spectrum keeps working.
+
+**What that accepts:** the derived spectral data is downloadable by anyone with
+the URL. It is 300 bytes per second — magnitude only, phase discarded, 40 ms
+resolution, 24 log bands — and cannot be inverted to audio. Playback still runs
+entirely through the official YouTube and SoundCloud embeds, so views and
+artist stats are unaffected.
+
+**What remains true regardless:** the *acquisition* used yt-dlp, which is a
+breach of YouTube's terms on downloading, and SoundCloud's are similar in
+shape. That is a property of how the envelopes were built, not of how they are
+served, and making the repo private would never have addressed it.
+
+**Reverse:** `gh api -X DELETE repos/Ryzzuh/mashMusic-eq/pages` stops public
+distribution. The live spectrum dies with it; local development is unaffected,
+since tools/serve.py maps the sibling checkout directly.
+
+---
+
 ## 2026-09-05 — Fonts self-hosted; the fidelity gap is closed
 
 Resolves the entry below, which recorded this gap as known and unfixed: every
