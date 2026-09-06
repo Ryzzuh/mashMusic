@@ -1746,6 +1746,7 @@
   function openListMenu(open, restoreFocus) {
     listModeMenu.hidden = !open;
     listModeMore.setAttribute("aria-expanded", String(open));
+    $("listModeCurrent").setAttribute("aria-expanded", String(open));
     // hiding the container while a menu item holds focus drops focus to <body>,
     // which tabs the user straight past this control
     if (!open && restoreFocus) listModeMore.focus();
@@ -1762,7 +1763,7 @@
     // not a toggle: it names the active mode and returns you to plain titles,
     // so aria-pressed would announce the inverse of what is on screen
     pill.classList.toggle("is-active", mode !== "show");
-    pill.title = mode === "show" ? "Titles are shown" : "Back to plain titles";
+    pill.title = "Change how titles are shown";
     listModeMenu.querySelectorAll("[data-listmode]").forEach((b) =>
       b.setAttribute("aria-current", String(b.dataset.listmode === mode)));
 
@@ -1777,12 +1778,17 @@
     render(false);
   }
 
-  // the visible pill names the active mode and clicking it returns to plain
-  $("listModeCurrent").addEventListener("click", () => setListMode("show"));
-  listModeMore.addEventListener("click", (e) => {
+  /* Both halves of the control open the picker. The pill used to be a shortcut
+     back to plain titles, which meant that once you left "Shown" it vanished
+     from the interface entirely — the menu only ever listed the other two, and
+     the way back was a title attribute nobody reads. The menu now lists all
+     three and marks the active one. */
+  const toggleListMenu = (e) => {
     e.stopPropagation();
     openListMenu(listModeMenu.hidden);
-  });
+  };
+  $("listModeCurrent").addEventListener("click", toggleListMenu);
+  listModeMore.addEventListener("click", toggleListMenu);
   listModeMenu.querySelectorAll("[data-listmode]").forEach((btn) => {
     btn.addEventListener("click", () => setListMode(btn.dataset.listmode));
   });
@@ -1799,15 +1805,29 @@
     if (!toolsPanel.hidden) { openToolsPanel(false); toolsMore.focus(); }
   });
 
-  document.querySelectorAll("[data-skin]").forEach((btn) => {
-    if (!btn.dataset.skin || btn.tagName !== "BUTTON") return;
-    btn.addEventListener("click", () => {
-      document.documentElement.dataset.skin = btn.dataset.skin;
-      document.querySelectorAll("button[data-skin]").forEach((b) =>
-        b.setAttribute("aria-pressed", String(b === btn)));
-      prefs.skin = btn.dataset.skin;
-      store.write(K_PREF, prefs);
-    });
+  const ALL_SKINS = ["jukebox", "night"];
+
+  function setSkin(name) {
+    if (!ALL_SKINS.includes(name)) return;
+    document.documentElement.dataset.skin = name;
+    document.querySelectorAll("button[data-skin]").forEach((b) =>
+      b.setAttribute("aria-pressed", String(b.dataset.skin === name)));
+    prefs.skin = name;
+    store.write(K_PREF, prefs);
+  }
+
+  document.querySelectorAll("button[data-skin]").forEach((btn) => {
+    if (!btn.dataset.skin) return;
+    btn.addEventListener("click", () => setSkin(btn.dataset.skin));
+  });
+
+  /* The palette straddles the divider between the two theme buttons, so it
+     reads as the thing that sits between them — clicking it moves to the other
+     profile. It carries the active theme's colours, which is what makes it
+     legible as a switch rather than an ornament. */
+  $("skinBadge").addEventListener("click", () => {
+    const current = document.documentElement.dataset.skin;
+    setSkin(ALL_SKINS[(ALL_SKINS.indexOf(current) + 1) % ALL_SKINS.length]);
   });
 
   /* --------------------------------------- collapsing stage (QoL 10)
