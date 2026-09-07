@@ -11,7 +11,7 @@ keep serving from cache without ever revalidating, and you debug a stale file.
 import functools
 import os
 import sys
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -46,7 +46,13 @@ def main():
     handler = functools.partial(NoCacheHandler, directory=ROOT)
     print("serving %s at http://localhost:%d (no-store)" % (ROOT, port))
     print("  %s -> %s" % (EQ_PREFIX, EQ_DIR))
-    HTTPServer(("127.0.0.1", port), handler).serve_forever()
+    # Threaded, not the stdlib default. HTTPServer handles exactly one request
+    # at a time, and a browser opens ~6 connections per page: index.html,
+    # app.css, app.js, the 1,257-track data/tracks.js, five font files, the
+    # liveness sidecar, and a spectral envelope per track played. Serialising
+    # those made the Playwright suite's most timing-sensitive test take over
+    # 60s in a full run while taking 6.5s alone.
+    ThreadingHTTPServer(("127.0.0.1", port), handler).serve_forever()
 
 
 if __name__ == "__main__":

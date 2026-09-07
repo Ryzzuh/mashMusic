@@ -17,9 +17,20 @@ npx playwright test tests/x.spec.js -g "name"
 python3 tools/serve.py 8412         # dev server (prefer the Browser pane's preview_start)
 ```
 
-`tools/serve.py` exists rather than `python3 -m http.server` for two reasons: it
-sends `no-store`, and it maps `/mashMusic-eq/` to the sibling envelope checkout
-so the spectrum works locally.
+`tools/serve.py` exists rather than `python3 -m http.server` for three reasons:
+it sends `no-store`, it maps `/mashMusic-eq/` to the sibling envelope checkout
+so the spectrum works locally, and it is **threaded**. That last one is not
+cosmetic: the stdlib `HTTPServer` serves one request at a time, and a browser
+opens ~6 connections for index.html, app.css, app.js, the 1,257-track
+`data/tracks.js`, five fonts, the liveness sidecar and an envelope per track
+played. Serialising those cost the suite 22% and made its most timing-sensitive
+test exceed a 60s budget while taking 6.5s alone.
+
+**Do not reach for more Playwright workers.** Measured on this machine (2
+physical cores, 8GB): workers 1 = 6.0 min wall / 410s CPU / load ~15; workers 2
+= 5.8 min / 508s CPU / load ~48. 3% faster for 24% more CPU, and the extra load
+is exactly what makes the timing-sensitive tests flake. `playwright.config.js`
+carries the numbers.
 
 ## Architecture, such as it is
 
