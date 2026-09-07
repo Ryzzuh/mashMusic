@@ -12,7 +12,13 @@
   const $ = (id) => document.getElementById(id);
   const CHUNK = 60;
 
-  const TRACKS = (window.MASH_TRACKS || []).map((t, i) => ({ ...t, n: i + 1 }));
+  /* The built-in library: the 1,257 tracks tools/build-tracks.py baked out of
+     the 2015 dataset. `k` ships in the data, so it is never derived here.
+     TRACKS is this plus whatever playlists have imported — see rebuildLibrary.
+     It is reassigned rather than mutated so no stale reference can outlive a
+     rebuild; every reader goes through the binding. */
+  const BUILTIN = (window.MASH_TRACKS || []).map((t, i) => ({ ...t, n: i + 1 }));
+  let TRACKS = BUILTIN;
 
   // ------------------------------------------------------------------ stores
 
@@ -37,6 +43,9 @@
   const K_PLAYED = "mash.played.v1";
   const K_SWAP = "mash.replacements.v1";
   const K_CHECK = "mash.livecheck.v1";
+  const K_LISTS = "mash.playlists.v1";
+  const K_IMPORT = "mash.imported.v1";
+  const K_LIST = "mash.playlist.v1";
 
   /* Liveness:
    *   { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch>,
@@ -80,11 +89,17 @@
    * predicate in buildView() is a no-op until something is deselected. Names
    * come from the same field the panel ranks, so the two cannot drift. */
   const contributorOf = (t) => t.v || "Unattributed";
-  const ALL_WHO = [...new Set(TRACKS.map(contributorOf))];
+  /* Was a const computed once at load. A playlist can narrow or widen the
+     contributor universe, so it is now recomputed by rebuildLibrary(). */
+  let ALL_WHO = [];
   const storedWho = store.read(K_WHO, null);
-  const who = new Set(
-    Array.isArray(storedWho) ? storedWho.filter((n) => ALL_WHO.includes(n)) : ALL_WHO
-  );
+  /* Deliberately NOT filtered against ALL_WHO here. It used to be, and that
+     silently dropped a name the moment the universe narrowed — switching to a
+     playlist would have discarded the whole contributor selection on read and
+     never given it back. Unknown names are harmless: they simply match nothing
+     in buildView(), and come back when their playlist does. */
+  const who = new Set(Array.isArray(storedWho) ? storedWho : []);
+  let whoWasStored = Array.isArray(storedWho);
   const everyoneSelected = () => ALL_WHO.every((n) => who.has(n));
   /* Source filter. Two independent toggles rather than a two-position switch:
    * a switch that can only ever select one source could never show the whole
@@ -97,6 +112,78 @@
   if (!sources.size) ALL_SOURCES.forEach((x) => sources.add(x));   // same guard as the click path
 
   const prefs = Object.assign({ skin: "jukebox", listMode: "show" }, store.read(K_PREF, {}));
+
+  // --------------------------------------------------------------- playlists
+
+  /* The built-in library is the default playlist and is not stored: it is
+     whatever tools/build-tracks.py shipped. Imported playlists are lists of
+     track keys; the track objects they refer to live in K_IMPORT so a reload
+     does not have to re-fetch anyone's metadata.
+
+     One playlist is visible at a time. Membership is a single predicate in
+     buildView() — the same shape favourites, contributors and sources already
+     use — so the wheel, autoplay, the counts and the transport readouts all
+     follow a playlist switch without knowing playlists exist. */
+  let playlists = store.read(K_LISTS, []);
+  if (!Array.isArray(playlists)) playlists = [];
+  const imported = store.read(K_IMPORT, {}) || {};
+  let currentList = store.read(K_LIST, null);
+  let playlistKeys = null;             // null means the built-in library
+  let booted = false;
+
+  const listById = (id) => playlists.find((p) => p.id === id) || null;
+  const currentListName = () => (currentList ? (listById(currentList)?.name || "Playlist") : "Library");
+
+  function rebuildLibrary() {
+    // A playlist that no longer exists must not leave the app showing nothing.
+    if (currentList && !listById(currentList)) currentList = null;
+
+    const extra = Object.values(imported);
+    TRACKS = extra.length
+      ? BUILTIN.concat(extra.map((t, i) => ({ ...t, imported: true, n: BUILTIN.length + i + 1 })))
+      : BUILTIN;
+
+    ALL_WHO = [...new Set(TRACKS.map(contributorOf))];
+    // Nothing stored means "everyone", which has to be recomputed as the
+    // universe grows or a newly imported contributor would start deselected.
+    if (!whoWasStored) { who.clear(); ALL_WHO.forEach((n) => who.add(n)); }
+
+    playlistKeys = currentList ? new Set(listById(currentList).keys || []) : null;
+
+    // uncheckedTracks() is declared below; at boot its own initialiser runs
+    // after this and gets the right number anyway.
+    if (booted) uncheckedCount = uncheckedTracks().length;
+  }
+  rebuildLibrary();
+
+  /* How many tracks the current playlist contains, before any other filter.
+     Not TRACKS.length: that is every track the app knows about, including ones
+     imported by playlists you are not looking at, so using it made the Library
+     claim a total it was not showing. */
+  const scopeCount = () => (playlistKeys ? playlistKeys.size : BUILTIN.length);
+
+  /* The stop-button copy describes the 2015 archive, which is only true of the
+     built-in library — a playlist gets its own name instead of inheriting a
+     provenance that is not its. */
+  const idleCopy = () => (currentList
+    ? `${scopeCount().toLocaleString()} tracks in ${currentListName()}.`
+    : `${BUILTIN.length.toLocaleString()} tracks, posted by friends between 2012 and 2015.`);
+
+  function saveLists() {
+    store.write(K_LISTS, playlists);
+    store.write(K_IMPORT, imported);
+    store.write(K_LIST, currentList);
+  }
+
+  function selectPlaylist(id) {
+    currentList = id || null;
+    rebuildLibrary();
+    store.write(K_LIST, currentList);
+    paintPlaylist();
+    buildContributors();       // the contributor universe just changed
+    render(true);
+  }
+
 
   /* "gone" and "blocked" are verdicts — the platform told us. "stalled" is a
    * suspicion raised by the watchdog, which a slow network can also trigger,
@@ -396,6 +483,10 @@
   function buildView() {
     const q = state.query.trim().toLowerCase();
     state.view = TRACKS.filter((t) => {
+      /* Playlist membership. Default (null) is the built-in library, so an
+         imported track is only ever visible inside a playlist that names it. */
+      if (playlistKeys) { if (!playlistKeys.has(t.k)) return false; }
+      else if (t.imported) return false;
       if (played.has(t.k)) return false;
       // "hide" no longer redacts titles; it drops the tracks the platforms
       // have lost — the same set the status bar counts as unavailable
@@ -568,13 +659,13 @@
     paintTransportFlanks();
     $("statLoaded").textContent =
       `showing ${state.shown} / ${state.order.length}` +
-      (state.order.length !== TRACKS.length ? ` (of ${TRACKS.length})` : "");
+      (state.order.length !== scopeCount() ? ` (of ${scopeCount()})` : "");
     $("statDead").textContent = deadCount ? `${deadCount} unavailable` : "";
     paintCheckButton();
     const pl = $("statPlayed");
     pl.hidden = !played.size;
     pl.textContent = `${played.size} played \u00b7 reset`;
-    $("brandCount").textContent = `${TRACKS.length} tracks`;
+    $("brandCount").textContent = `${scopeCount()} tracks`;
   }
 
   function paintCheckButton() {
@@ -591,6 +682,154 @@
     b.title = budget > 0
       ? `Ask YouTube and SoundCloud whether these ids still resolve. ${budget} requests left today.`
       : "Today's check budget is spent; it resets at midnight.";
+  }
+
+  // ------------------------------------------------------- playlist import
+
+  /* A Google Sheet is readable from a static page with no key and no backend:
+     the gviz endpoint answers cross-origin (measured 2026-09-08). What it does
+     NOT do is fail loudly — a sheet that is not shared returns an HTML sign-in
+     page with a 200, so the body has to be inspected, not just the status. */
+  const SHEET_ID = /\/spreadsheets\/d\/(?:e\/)?([A-Za-z0-9_-]{16,})/;
+  const YT_ID = /^[A-Za-z0-9_-]{11}$/;
+  const YT_IN_URL = /(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([A-Za-z0-9_-]{11})/;
+
+  /** A full Sheets URL or a bare document id; null if it is neither. */
+  function parseSheetRef(input) {
+    const raw = (input || "").trim();
+    if (!raw) return null;
+    const m = raw.match(SHEET_ID);
+    if (m) {
+      const gid = raw.match(/[#&?]gid=(\d+)/);
+      return { id: m[1], gid: gid ? gid[1] : null };
+    }
+    // A bare id. Deliberately not accepting anything shorter: an 11-character
+    // string is a YouTube id, and treating one as a document is a confusing
+    // failure three network calls later.
+    if (/^[A-Za-z0-9_-]{16,}$/.test(raw)) return { id: raw, gid: null };
+    return null;
+  }
+
+  const sheetCsvUrl = (ref) =>
+    `https://docs.google.com/spreadsheets/d/${ref.id}/gviz/tq?tqx=out:csv` +
+    (ref.gid ? `&gid=${ref.gid}` : "");
+
+  /** Every YouTube id in a blob of CSV, in order, deduped. */
+  function idsFromCsv(text) {
+    const out = [];
+    const seen = new Set();
+    // Cheap split rather than a full CSV parse: the format here is one value
+    // per cell, and quotes/commas inside a YouTube id are impossible.
+    for (const cell of text.split(/[\r\n,]+/)) {
+      const v = cell.replace(/^"+|"+$/g, "").trim();
+      if (!v) continue;
+      const m = v.match(YT_IN_URL);
+      const id = m ? m[1] : (YT_ID.test(v) ? v : null);
+      if (id && !seen.has(id)) { seen.add(id); out.push(id); }
+    }
+    return out;
+  }
+
+  /** Title, channel and thumbnail for an id. No key; no duration available. */
+  async function ytMeta(id) {
+    const url = "https://www.youtube.com/oembed?format=json&url=" +
+      encodeURIComponent("https://www.youtube.com/watch?v=" + id);
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) return null;
+      const j = await res.json();
+      return { t: j.title || id, v: j.author_name || "", a: j.thumbnail_url || "" };
+    } catch (e) { return null; }
+  }
+
+  function setPlStatus(msg, bad) {
+    const el = $("plStatus");
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.toggle("is-bad", !!bad);
+  }
+
+  /* Placeholders. Real functions with the real signature so the picker, the
+     dispatch and the status line are all exercised — only the body is absent.
+     They must reject, not quietly succeed; a mutation check covers that. */
+  const NOT_BUILT = {
+    paste:  "Pasting a list is not built yet.",
+    ytlist: "YouTube playlist import is not built yet — it needs an API key.",
+    file:   "File upload is not built yet.",
+    scset:  "SoundCloud sets are not built yet — their API has been closed since 2019.",
+  };
+  const importers = {
+    sheets: importFromSheet,
+    paste:  async () => ({ ok: false, error: NOT_BUILT.paste }),
+    ytlist: async () => ({ ok: false, error: NOT_BUILT.ytlist }),
+    file:   async () => ({ ok: false, error: NOT_BUILT.file }),
+    scset:  async () => ({ ok: false, error: NOT_BUILT.scset }),
+  };
+
+  async function importFromSheet(input) {
+    const ref = parseSheetRef(input);
+    if (!ref) return { ok: false, error: "That is not a Sheets link or document id." };
+
+    let text;
+    try {
+      const res = await fetch(sheetCsvUrl(ref), { cache: "no-store" });
+      if (!res.ok) return { ok: false, error: `Google answered ${res.status}. Is the link right?` };
+      text = await res.text();
+    } catch (e) {
+      return { ok: false, error: "Could not reach Google Sheets." };
+    }
+
+    /* The sign-in page arrives as a 200. Without this the importer reports
+       "no YouTube ids found" for what is really a permissions problem, and
+       sends you looking at the wrong thing. */
+    if (/^\s*<(?:!doctype|html)/i.test(text)) {
+      return { ok: false, error: "That sheet is not shared. Set it to \u201canyone with the link can view\u201d." };
+    }
+
+    const ids = idsFromCsv(text);
+    if (!ids.length) return { ok: false, error: "No YouTube ids or links in that sheet." };
+
+    const keys = [];
+    const fresh = [];
+    for (const id of ids) {
+      const k = "YT:" + id;
+      keys.push(k);
+      // Already in the library or already imported: reuse it, ask nobody.
+      if (!TRACKS.some((t) => t.k === k) && !imported[k]) fresh.push({ k, i: id });
+    }
+
+    let done = 0;
+    let cursor = 0;
+    async function worker() {
+      while (cursor < fresh.length) {
+        const item = fresh[cursor++];
+        if (checkRemaining() <= 0) { item.skip = true; continue; }
+        spendCheck(1);
+        const meta = await ytMeta(item.i);
+        done++;
+        setPlStatus(`fetching ${done}/${fresh.length}\u2026`);
+        item.meta = meta;
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(4, fresh.length) }, worker));
+
+    for (const item of fresh) {
+      const m = item.meta;
+      imported[item.k] = {
+        k: item.k, s: "YT", i: item.i,
+        t: m ? m.t : item.i,
+        v: m ? m.v : "",
+        d: 0,                       // learned from the player on first play
+        a: m ? m.a : "",
+        c: new Date().toISOString().slice(0, 10),
+      };
+    }
+
+    const name = `Sheet ${ref.id.slice(0, 6)}`;
+    const id = "pl" + Date.now().toString(36);
+    playlists.push({ id, name, type: "sheets", source: ref.id, keys, added: Date.now() });
+    saveLists();
+    return { ok: true, id, count: keys.length, added: fresh.length };
   }
 
   // ------------------------------------------------------------------ favs
@@ -916,13 +1155,18 @@
   $("statPlayed").addEventListener("click", resetPlayed);
   $("statCheck").addEventListener("click", () => { runLivenessBatch(); });
 
-  /* The only seam in the app that exists partly for the tests, and it is here
-   * because the alternative is leaving Jukebox 3 unverified: both end events
-   * fire inside a cross-origin iframe and cannot be synthesised from outside
-   * it. It is a fair extension point in its own right — anything may declare
-   * a track finished — and it carries no privilege the UI does not already
-   * have. Everything else in the suite drives real controls. */
+  /* The two seams in the app that exist partly for the tests, and they are
+   * here because the alternative is leaving the features unverified: the
+   * events they stand in for fire inside a cross-origin iframe and cannot be
+   * synthesised from outside it. Both are fair extension points in their own
+   * right — anything may declare a track finished, or report how long it
+   * turned out to be — and neither carries a privilege the UI does not
+   * already have. Everything else in the suite drives real controls.
+   *
+   * mash:completed  — Jukebox 3, the decaying tracklist.
+   * mash:duration   — an imported track's runtime, which oEmbed never gives. */
   document.addEventListener("mash:completed", completed);
+  document.addEventListener("mash:duration", (e) => learnDuration(state.current, e.detail));
 
   $("tFav").addEventListener("click", () => {
     if (!state.current) return;
@@ -1093,7 +1337,7 @@
     setEqTag("no envelope", false);
     $("npSource").textContent = "—";
     $("npTitle").textContent = "Nothing playing";
-    $("npSub").textContent = TRACKS.length.toLocaleString() + " tracks, posted by friends between 2012 and 2015.";
+    $("npSub").textContent = idleCopy();
     $("npFlags").innerHTML = "";
   });
 
@@ -1310,7 +1554,24 @@
         });
         sc.getDuration((ms) => { if (ok(ms) && ms > 0) mediaDuration = ms / 1000; });
       }
+      learnDuration(track, mediaDuration);
     } catch (e) { /* player not ready yet */ }
+  }
+
+  /* oEmbed carries no duration, so an imported track arrives with d: 0 and the
+     "time remaining" readouts under-count it. The player knows, though, so the
+     first play fills it in permanently. Built-in tracks already have a
+     duration from the 2015 dataset and are left alone. */
+  function learnDuration(track, secs) {
+    if (!track || track.d || !imported[track.k]) return;
+    if (!(secs > 0) || contentMismatch) return;      // never learn from an ad
+    const d = Math.round(secs);
+    imported[track.k].d = d;
+    track.d = d;
+    const inView = state.view.find((t) => t.k === track.k);
+    if (inView) inView.d = d;
+    store.write(K_IMPORT, imported);
+    paintTransportFlanks();
   }
 
   // Player-reported duration when we have it, dataset duration until then.
@@ -1843,7 +2104,7 @@
     const filtered = !everyoneSelected();
     $("contribSub").textContent = filtered
       ? `${who.size} of ${ALL_WHO.length} selected  ·  ${state.view.length.toLocaleString()} tracks`
-      : `${ALL_WHO.length} people  ·  ${TRACKS.length.toLocaleString()} tracks`;
+      : `${ALL_WHO.length} people  \u00b7  ${scopeCount().toLocaleString()} tracks`;
     // an action, not a toggle: aria-pressed here would announce a state that
     // contradicts the label, which is the defect already fixed on the mode pill
     $("contribAll").textContent = filtered ? "All" : "None";
@@ -1958,6 +2219,110 @@
     if (!toolsPanel.hidden) { openToolsPanel(false); toolsMore.focus(); }
   });
 
+  // ---------------------------------------------------------- playlist UI
+
+  const plMenu = $("plMenu");
+  const plMore = $("plMore");
+  const plModal = $("plModal");
+
+  function openPlMenu(open, restoreFocus) {
+    plMenu.hidden = !open;
+    plMore.setAttribute("aria-expanded", String(open));
+    $("plCurrent").setAttribute("aria-expanded", String(open));
+    if (!open && restoreFocus) plMore.focus();
+  }
+
+  /* Rebuilt rather than toggled, because the set of playlists changes. The
+     built-in library is always first and can never be deleted. */
+  function paintPlaylist() {
+    $("plCurrent").textContent = currentListName();
+    $("plCurrent").title = `Playlist: ${currentListName()}`;
+    plMenu.innerHTML = "";
+
+    const add = (label, onClick, active, cls) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      // aria-current, matching the list-mode menu — the styling keys off it
+      b.setAttribute("aria-current", String(!!active));
+      if (cls) b.classList.add(cls);
+      b.addEventListener("click", onClick);
+      plMenu.appendChild(b);
+      return b;
+    };
+
+    add("Library", () => { openPlMenu(false); selectPlaylist(null); }, !currentList)
+      .dataset.playlist = "";
+    for (const p of playlists) {
+      add(p.name, () => { openPlMenu(false); selectPlaylist(p.id); }, currentList === p.id)
+        .dataset.playlist = p.id;
+    }
+    add("Add playlist\u2026", () => { openPlMenu(false); openPlModal(); }, false, "pl-add")
+      .dataset.playlist = "new";
+
+    // The pill's width just changed, and the ResizeObserver watches .topbar,
+    // whose size never does — same reason setListMode() calls this.
+    if (typeof reflowTools === "function") reflowTools();
+  }
+
+  let plType = "sheets";
+
+  function setPlType(type) {
+    plType = type;
+    plModal.querySelectorAll("[data-pltype]").forEach((b) =>
+      b.setAttribute("aria-checked", String(b.dataset.pltype === type)));
+    const sheets = type === "sheets";
+    $("plUrl").disabled = !sheets;
+    $("plUrl").placeholder = sheets ? "Sheets link or document ID" : "Not available yet";
+    $("plHint").hidden = !sheets;
+  }
+
+  function openPlModal() {
+    setPlType("sheets");
+    $("plUrl").value = "";
+    setPlStatus("");
+    plModal.showModal();
+  }
+
+  async function runImport() {
+    const go = $("plGo");
+    if (go.disabled) return;
+    const fn = importers[plType];
+    if (!fn) return;
+
+    go.disabled = true;
+    setPlStatus("working\u2026");
+    let res;
+    try { res = await fn($("plUrl").value); }
+    catch (e) { res = { ok: false, error: "Import failed: " + e.message }; }
+    go.disabled = false;
+
+    if (!res || !res.ok) { setPlStatus((res && res.error) || "Import failed.", true); return; }
+
+    setPlStatus(`imported ${res.count} tracks`);
+    paintPlaylist();
+    selectPlaylist(res.id);           // switch to what was just imported
+    plModal.close();
+  }
+
+  $("plCurrent").addEventListener("click", (e) => { e.stopPropagation(); openPlMenu(plMenu.hidden); });
+  plMore.addEventListener("click", (e) => { e.stopPropagation(); openPlMenu(plMenu.hidden); });
+  document.addEventListener("click", (e) => {
+    if (!plMenu.hidden && !e.target.closest(".playlist")) openPlMenu(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !plMenu.hidden) { openPlMenu(false, true); }
+  });
+
+  plModal.querySelectorAll("[data-pltype]").forEach((b) => {
+    b.addEventListener("click", () => setPlType(b.dataset.pltype));
+  });
+  $("plClose").addEventListener("click", () => plModal.close());
+  plModal.addEventListener("click", (e) => { if (e.target === plModal) plModal.close(); });
+  $("plGo").addEventListener("click", runImport);
+  $("plUrl").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); runImport(); }
+  });
+
   const ALL_SKINS = ["jukebox", "night"];
 
   function setSkin(name) {
@@ -2042,13 +2407,14 @@
    * its own floor; past that, whole controls move into a panel behind a "more"
    * button rather than wrapping the bar to a second row.
    *
-   * Collapse order is least-used-first: the theme is set once and left alone,
-   * the list-mode picker is reached for more often, and the search is never
-   * collapsed because it is the only way to reach a specific track in 1,257.
+   * Collapse order is least-used-first: a playlist is chosen once a session at
+   * most, the theme is set once and left alone, the list-mode picker is
+   * reached for more often, and the search is never collapsed because it is
+   * the only way to reach a specific track in 1,257.
    *
    * Every pass starts from fully expanded, so widening the window restores
    * controls to the bar instead of stranding them in the panel. */
-  const COLLAPSE_ORDER = [".skin-switch", ".listmode"];
+  const COLLAPSE_ORDER = [".playlist", ".skin-switch", ".listmode"];
   const toolsEl = document.querySelector(".tools");
   const toolsPanel = $("toolsPanel");
   const toolsMore = $("toolsMore");
@@ -2126,8 +2492,11 @@
 
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea")) return;
-    if (contribModal.open) return;
-    if (!listModeMenu.hidden) return;          // the open picker owns the keys
+    /* Any open dialog owns the keyboard. This used to name contribModal
+       alone, so ArrowLeft/ArrowRight with focus on a non-input control inside
+       the swap, wheel or playlist dialog skipped the track underneath. */
+    if (document.querySelector("dialog[open]")) return;
+    if (!listModeMenu.hidden || !plMenu.hidden) return;   // an open picker owns the keys
     // Space on a focused button must activate that button, not the transport
     if (e.key === " " && e.target.matches("button")) return;
     if (e.key === "ArrowRight") { e.preventDefault(); next(); }
@@ -2137,12 +2506,15 @@
 
   // -------------------------------------------------------------------- go
 
+  booted = true;
+  paintPlaylist();
+
   document.documentElement.dataset.skin = prefs.skin;
   document.querySelectorAll("button[data-skin]").forEach((b) =>
     b.setAttribute("aria-pressed", String(b.dataset.skin === prefs.skin)));
   setListMode(state.listMode, { silent: true });
 
-  $("npSub").textContent = TRACKS.length.toLocaleString() + " tracks, posted by friends between 2012 and 2015.";
+  $("npSub").textContent = idleCopy();
   $("statNote").textContent = "liveness learned from playback";
 
   render(true);

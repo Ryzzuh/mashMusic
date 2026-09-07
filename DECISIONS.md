@@ -6,6 +6,81 @@ to undo it.
 
 ---
 
+## 2026-09-08 — Playlists, and the library becomes one of them
+
+**Asked for:** the existing library as the default playlist, a way to add more,
+several methods with the first being a Google Sheets document of YouTube ids,
+placeholders for the rest, and a top-bar button that lets the user pick a type.
+
+**Measured before designing, and both answers changed the shape:**
+
+- **Google Sheets is readable from a static page with no key.** The gviz CSV
+  endpoint answers cross-origin (`type: "cors"`, real CSV). No backend, no
+  proxy, no API key. But an unshared sheet returns an HTML **sign-in page with
+  a 200**, so the importer inspects the body, not the status — without that it
+  reports "no ids found" for what is really a permissions problem and sends you
+  looking at the wrong thing.
+- **oEmbed gives title, channel and thumbnail for a bare id, and never
+  duration.** So imports start at `d: 0` and learn the real figure from the
+  player on first play, rather than requiring a key.
+
+**Chosen:** playlists switch, one at a time, with the built-in library as the
+default. Membership is a single predicate in `buildView()` — the same shape
+favourites, contributors and sources already use — so the wheel, autoplay, the
+counts and the transport readouts all follow a switch without knowing playlists
+exist.
+
+**`TRACKS` is no longer a constant.** It is the built-in library plus whatever
+playlists have imported, rebuilt by `rebuildLibrary()`. `ALL_WHO` and the
+contributor panel were computed once at load and are now recomputed with it.
+
+**`scopeCount()` rather than `TRACKS.length` for the counters.** `TRACKS` is
+every track the app knows about, including ones imported by a playlist you are
+not looking at, so the brand count claimed a total it was not showing.
+
+**`K_WHO` is no longer filtered against `ALL_WHO` on read.** It used to be, and
+that silently dropped any name not in the current universe — switching to a
+playlist would have discarded the entire contributor selection on read and
+never given it back. Unknown names are harmless: they match nothing, and return
+when their playlist does.
+
+**Placeholders are selectable, not disabled.** Disabling them made the four
+unbuilt methods unreachable, which meant the dispatcher was never exercised and
+"a placeholder quietly succeeds" could not be caught by any test. They now
+select, disable the field, and report why they cannot run.
+
+**A second test-only seam, `mash:duration`.** For the same reason as
+`mash:completed`: the player's duration arrives inside a cross-origin iframe
+the suite blocks, so the alternative was shipping the write-back untested.
+
+**Three class collisions, all found by tests rather than reasoning.** The
+control began as `class="listmode playlist"` reusing the list-mode styling.
+That broke `COLLAPSE_ORDER`'s `querySelector(".listmode")` (which then matched
+the playlist), the outside-click handler, `.listmode-menu button` (5 elements,
+not 3) and `.search` (2 elements, not 1). Shared *styling* is fine; shared
+*class names* are not, when JS and tests select on them. Each is now its own
+class with the CSS selector extended.
+
+**Not verified live:** a successful import from a real sheet. Both halves are
+proven against the real services — the Sheets fetch end-to-end through the UI
+(it correctly reported "no ids" for Google's public sample), and oEmbed
+returning a real title for a real id — but no public sheet containing YouTube
+ids exists to test their combination. That needs one link-viewable sheet.
+
+**Three tests passed for the wrong reason and the mutation harness caught all
+three:** imported tracks are appended past position 1,257 and only 60 rows
+render, so scanning `.trow` could never see them; every built-in track has a
+non-zero duration, making one guard clause unreachable and its mutant a throw
+rather than an observable change; and ArrowRight followed by ArrowLeft returns
+to the same track, so the keyboard-guard test cancelled itself out.
+
+**To reverse:** the predicate in `buildView()`, `rebuildLibrary`,
+`selectPlaylist`, the import block and the playlist UI block in `app.js`, the
+`.playlist` control and `#plModal` in `index.html`. Removing them leaves the
+built-in library exactly as it was; `t.imported` becomes vestigial.
+
+---
+
 ## 2026-09-07 — Liveness is checked in two places, and verdicts carry provenance
 
 **Asked for:** check-liveness to work two ways — as a batch that estimates

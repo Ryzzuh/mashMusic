@@ -40,10 +40,37 @@ Adding a predicate there reaches the tracklist, the counts, autoplay and the
 wheel at once. Filtering anywhere else will desynchronise them. This is the most
 important convention in the codebase.
 
+## Playlists
+
+`TRACKS` is **not** a constant: it is the built-in library (`BUILTIN`, what
+`build-tracks.py` shipped) plus whatever playlists have imported, rebuilt by
+`rebuildLibrary()`. Anything derived from the whole library — `ALL_WHO`, the
+contributor panel, the liveness pool — must be recomputed there, not captured
+once at load.
+
+Membership is one predicate in `buildView()`, like every other filter. One
+playlist is visible at a time; the built-in library is the default and shows no
+imported tracks.
+
+Use **`scopeCount()`, not `TRACKS.length`**, for anything the user reads as a
+total. `TRACKS` includes tracks imported by playlists that are not on screen.
+
+Import is keyless by design: Google Sheets' gviz CSV endpoint and YouTube's
+oEmbed both answer cross-origin with no key. Two traps, both with tests:
+an unshared sheet returns an **HTML sign-in page with a 200**, and oEmbed
+**never returns duration** — imported tracks start at `d: 0` and learn it from
+the player on first play.
+
+**Do not give a new control a class that an existing one uses.** Sharing
+`.listmode`, `.listmode-menu` and `.search` for styling broke
+`COLLAPSE_ORDER`'s `querySelector`, the outside-click handler and two test
+selectors. Give it its own class and extend the CSS selector instead.
+
 State that survives reloads is in `localStorage` under `mash.*`:
 `mash.favs.v1`, `mash.prefs.v1`, `mash.liveness.v1`, `mash.played.v1`,
 `mash.contributors.v1`, `mash.sources.v1`, `mash.wheel.v1`,
-`mash.replacements.v1`.
+`mash.replacements.v1`, `mash.livecheck.v1`, `mash.playlists.v1`,
+`mash.imported.v1`, `mash.playlist.v1`.
 
 Sidecar files in `data/` carry perishable facts so `tracks.js` — a historical
 record — is never rewritten: `liveness.json` (which ids the platforms lost) and
@@ -76,6 +103,11 @@ is our own per-day request ledger, not a reading of anything Google exposes.
 
 The suite exists because nine defects shipped in one unassisted session, several
 of them live. Two rules earned the hard way:
+
+**0. There are two test-only seams**, both because the real event fires inside
+a cross-origin iframe the suite blocks: `mash:completed` (a track finished) and
+`mash:duration` (how long it turned out to be). Do not add a third without the
+same justification.
 
 **1. Never a fixed `waitForTimeout` before a geometry or computed-style
 assertion.** The stage animates its height (QoL 10), the transport buttons

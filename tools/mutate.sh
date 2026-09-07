@@ -413,5 +413,59 @@ mut 'the batch claims playback confidence for an oembed verdict' app.js \
   '        markLiveness(t, status, status === "gone" ? 404 : null, "playback");' \
   tests/liveness.spec.js 'records oembed verdicts'
 
+# ---------------------------------------------------------------- playlists
+# Membership is one predicate in buildView(); the counters and the importer's
+# failure modes are the rest of the surface worth breaking.
+
+mut 'the playlist predicate stops filtering' app.js \
+  '      if (playlistKeys) { if (!playlistKeys.has(t.k)) return false; }' \
+  '      if (playlistKeys) { if (false) return false; }' \
+  tests/playlist.spec.js 'becomes a playlist and the view switches'
+
+mut 'the library stops excluding imported tracks' app.js \
+  '      else if (t.imported) return false;' \
+  '      else if (false) return false;' \
+  tests/playlist.spec.js 'imported tracks stay out of the library'
+
+mut 'an unshared sheet is not recognised' app.js \
+  '    if (/^\s*<(?:!doctype|html)/i.test(text)) {' \
+  '    if (false) {' \
+  tests/playlist.spec.js 'permissions problem'
+
+mut 'ids already in the library are fetched again' app.js \
+  '      if (!TRACKS.some((t) => t.k === k) && !imported[k]) fresh.push({ k, i: id });' \
+  '      fresh.push({ k, i: id });' \
+  tests/playlist.spec.js 'reused, not fetched again'
+
+mut 'an imported duration is never written back' app.js \
+  '    if (!track || track.d || !imported[track.k]) return;' \
+  '    if (true) return;' \
+  tests/playlist.spec.js 'learns its duration'
+
+# Not checked: dropping the `!imported[track.k]` clause alone. Every built-in
+# track has a non-zero duration from the 2015 dataset, so `track.d` returns
+# first and the clause is unreachable for them — the mutant turns a no-op into
+# a throw, which no assertion can see. The `track.d` clause below is the part
+# of the guard that has observable behaviour.
+mut 'a learned duration can be revised by a later reading' app.js \
+  '    if (!track || track.d || !imported[track.k]) return;' \
+  '    if (!track || !imported[track.k]) return;' \
+  tests/playlist.spec.js 'learned once and not revised'
+
+mut 'a placeholder import quietly succeeds' app.js \
+  '    paste:  async () => ({ ok: false, error: NOT_BUILT.paste }),' \
+  '    paste:  async () => ({ ok: true, id: null, count: 0, added: 0 }),' \
+  tests/playlist.spec.js 'refuse rather than pretend'
+
+mut 'the counters go back to counting every known track' app.js \
+  '  const scopeCount = () => (playlistKeys ? playlistKeys.size : BUILTIN.length);' \
+  '  const scopeCount = () => TRACKS.length;' \
+  tests/playlist.spec.js 'imported tracks stay out of the library'
+
+mut 'any open dialog stops owning the keyboard' app.js \
+  '    if (document.querySelector("dialog[open]")) return;' \
+  '    if (false) return;' \
+  tests/playlist.spec.js 'arrow keys inside the dialog'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

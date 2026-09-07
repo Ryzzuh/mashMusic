@@ -53,6 +53,16 @@
       <input type="search" id="search" placeholder="Search titles and posters" autocomplete="off" spellcheck="false">
     </label>
 
+    <div class="playlist" id="playlistCtl" role="group" aria-label="Playlist">
+      <button class="pl-pill" id="plCurrent" aria-controls="plMenu"
+              aria-expanded="false" title="Switch playlist">Library</button>
+      <button class="pl-caret" id="plMore" aria-controls="plMenu"
+              aria-expanded="false" aria-label="Switch playlist">
+        <svg aria-hidden="true"><use href="#i-caret"></use></svg>
+      </button>
+      <div class="pl-menu" id="plMenu" hidden></div>
+    </div>
+
     <div class="listmode" role="group" aria-label="Track list visibility">
       <button class="listmode-current" id="listModeCurrent" aria-controls="listModeMenu"
               aria-expanded="false" title="Change how titles are shown">Shown</button>
@@ -196,6 +206,52 @@
   </section>
 
 </main>
+
+<dialog class="modal pl-modal" id="plModal" aria-labelledby="plTitle">
+  <header class="modal-head">
+    <div class="modal-heading">
+      <h2 id="plTitle">Add playlist</h2>
+      <p class="modal-sub" id="plSub">Bring in tracks from somewhere else</p>
+    </div>
+    <button class="modal-close" id="plClose" aria-label="Close" autofocus>&times;</button>
+  </header>
+
+  <div class="pl-body">
+    <div class="pl-types" role="radiogroup" aria-label="Import method">
+      <button role="radio" aria-checked="true" data-pltype="sheets">
+        <span class="pl-type-name">Google Sheets</span>
+        <span class="pl-type-note">One YouTube ID or link per cell</span>
+      </button>
+      <button role="radio" aria-checked="false" data-pltype="paste" data-placeholder>
+        <span class="pl-type-name">Paste a list</span>
+        <span class="pl-type-note">Not built yet</span>
+      </button>
+      <button role="radio" aria-checked="false" data-pltype="ytlist" data-placeholder>
+        <span class="pl-type-name">YouTube playlist</span>
+        <span class="pl-type-note">Not built yet &middot; needs an API key</span>
+      </button>
+      <button role="radio" aria-checked="false" data-pltype="file" data-placeholder>
+        <span class="pl-type-name">Upload a file</span>
+        <span class="pl-type-note">Not built yet</span>
+      </button>
+      <button role="radio" aria-checked="false" data-pltype="scset" data-placeholder>
+        <span class="pl-type-name">SoundCloud set</span>
+        <span class="pl-type-note">Not built yet &middot; API closed since 2019</span>
+      </button>
+    </div>
+
+    <label class="pl-field" for="plUrl">
+      <input id="plUrl" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Sheets link or document ID">
+    </label>
+    <p class="pl-hint" id="plHint">The sheet must be shared so anyone with the link can view it.</p>
+  </div>
+
+  <footer class="pl-foot">
+    <p class="pl-status" id="plStatus" aria-live="polite"></p>
+    <button class="wheel-spin" id="plGo">Import</button>
+  </footer>
+</dialog>
 
 <dialog class="modal" id="contribModal" aria-labelledby="contribTitle">
   <header class="modal-head">

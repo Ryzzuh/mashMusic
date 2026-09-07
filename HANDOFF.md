@@ -18,7 +18,7 @@ open. That is the state as of this writing.
 
 - All nine milestones of the feature spec (Jukebox 1, 2, 3, 11; QoL 1, 2, 4, 5,
   6, 7, 8, 10; touchups 1, 2).
-- 130 Playwright tests, 51 mutation checks in `tools/mutate.sh`, all passing.
+- 156 Playwright tests, 68 mutation checks in `tools/mutate.sh`, all passing.
 - Fonts self-hosted in `assets/fonts/`.
 - SoundCloud spectral envelopes merged into `Ryzzuh/mashMusic-eq` `main` and
   serving: 241/312 SoundCloud tracks (77%), 633/945 YouTube (66%).
@@ -134,6 +134,7 @@ is not a listen* — would ship untested.
 | `tools/find-replacements.mjs` | YouTube replacement search. **Never run; needs an API key.** |
 | `tools/serve.py` | Dev server; no-store, maps `/mashMusic-eq/`. |
 | `tests/helpers.js` | Shared helpers. `isHittable()` is strict; do not add an opt-out. |
+| `tests/playlist.spec.js` | Playlists and the Sheets importer. |
 | `DECISIONS.md` | 54 entries, newest first. Read before relitigating anything. |
 | `legacy/` | The 2015 AngularJS original, preserved. |
 | `PR-BODY.md` | Description used for PR #1. Historical; safe to delete. |
@@ -156,6 +157,14 @@ is not a listen* — would ship untested.
   third-party requests on load.
 
 ## Open TODOs
+
+0. **Create one public Google Sheet with YouTube ids in it** and import it
+   through the UI. This is the only unproven part of the playlist feature: the
+   Sheets fetch and the oEmbed lookup are each verified against the real
+   services, but their combination is only tested against stubs, because no
+   public sheet containing YouTube ids was available. Share it
+   "anyone with the link can view", then paste the link into
+   Playlist → Add playlist.
 
 1. **Populate liveness for real.** The in-app batch (the `check N of M`
    control in the status bar) needs no key and can run today — 25 tracks a

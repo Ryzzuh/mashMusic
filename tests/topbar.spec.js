@@ -256,6 +256,13 @@ test("the pill is highlighted only when a non-default mode is active", async ({ 
 /* Settle to a painted frame. A ResizeObserver callback runs before paint, so a
  * sub-frame sleep measures the previous layout: at a 9ms wait every collapse
  * boundary below reports 1px high. Two rAFs is the reliable wait. */
+/* The controls that collapse into #toolsPanel, in the order they leave the bar.
+   Named once here: several tests below only need "narrow enough that they have
+   all collapsed", and hard-coding the count meant adding a control silently
+   changed what six assertions were checking. The order is pinned by
+   "controls collapse into the panel and come back when there is room". */
+const COLLAPSIBLES = ["playlist", "switch", "listmode"];
+
 const settle = (page) =>
   page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
@@ -300,16 +307,22 @@ test("no overflow within a pixel of either collapse boundary", async ({ page }) 
   /* A uniform sweep is the wrong instrument. The window where a rounding
    * tolerance leaks a pixel of horizontal scroll is exactly ONE pixel wide,
    * so a 2px sweep finds it with probability 1/2 — it depends on the parity
-   * of the boundary, which is not a designed property. There are two
-   * boundaries (one per collapsible control), and loading the real fonts
-   * shifts each by 1px, flipping that parity.
+   * of the boundary, which is not a designed property. There is one boundary
+   * per collapsible control, and loading the real fonts shifts each by 1px,
+   * flipping that parity.
    *
    * So: binary-search each boundary, then check every integer width around
    * it. ~40 resizes instead of 600, and it cannot miss on parity. */
   const countAt = async (w) => (await barMetrics(page, w)).collapsed;
 
+  /* Derived, not hard-coded. This used to assume exactly two collapsibles;
+     adding a third meant the third boundary went unchecked while the test
+     still passed. Ask the app how many there are. */
+  const total = await countAt(320);
+  expect(total).toBeGreaterThanOrEqual(2);
+
   const boundaries = [];
-  for (const target of [1, 2]) {
+  for (let target = 1; target <= total; target++) {
     let lo = 320, hi = 1600;                 // count is monotonic as width falls
     while (hi - lo > 1) {
       const mid = Math.floor((lo + hi) / 2);
@@ -317,8 +330,9 @@ test("no overflow within a pixel of either collapse boundary", async ({ page }) 
     }
     boundaries.push(lo);
   }
-  expect(boundaries.length).toBe(2);
-  expect(boundaries[0]).toBeGreaterThan(boundaries[1]);
+  expect(boundaries.length).toBe(total);
+  for (let i = 1; i < boundaries.length; i++)
+    expect(boundaries[i - 1]).toBeGreaterThan(boundaries[i]);
 
   const bad = [];
   for (const b of boundaries) {
@@ -366,22 +380,32 @@ test("changing the list mode near a boundary does not overflow", async ({ page }
 test("controls collapse into the panel and come back when there is room", async ({ page }) => {
   const inPanel = () => page.$$eval("#toolsPanel > *", (e) => e.map((x) => x.className.split(" ")[0]));
 
-  expect(await inPanel()).toEqual([]);              // 1100px: everything on the bar
+  /* Collapse order is a designed property; the widths at which it happens are
+     not, and hard-coding them made this test wrong the moment a control was
+     added. Walk down and record the order things leave the bar in. */
+  const seen = [];
+  for (let w = 1600; w >= 320; w -= 8) {
+    await page.setViewportSize({ width: w, height: 820 });
+    await settle(page);
+    for (const name of await inPanel()) if (!seen.includes(name)) seen.push(name);
+  }
+  expect(seen).toEqual(COLLAPSIBLES);
+
+  await page.setViewportSize({ width: 1600, height: 820 });
+  await expect.poll(inPanel).toEqual([]);           // everything back on the bar
   await expect(page.locator("#toolsMore")).toBeHidden();
 
-  await page.setViewportSize({ width: 640, height: 820 });
-  await expect.poll(inPanel).toEqual(["switch"]);   // theme goes first
+  await page.setViewportSize({ width: 320, height: 820 });
+  await expect.poll(inPanel).toEqual(COLLAPSIBLES);
   await expect(page.locator("#toolsMore")).toBeVisible();
 
-  await page.setViewportSize({ width: 400, height: 820 });
-  await expect.poll(inPanel).toEqual(["switch", "listmode"]);
-
   // and widening restores them rather than stranding them in the panel
-  await page.setViewportSize({ width: 1100, height: 820 });
+  await page.setViewportSize({ width: 1600, height: 820 });
   await expect.poll(inPanel).toEqual([]);
   await expect(page.locator("#toolsMore")).toBeHidden();
   await expect(page.locator(".tools > .skin-switch")).toBeVisible();
   await expect(page.locator(".tools > .listmode")).toBeVisible();
+  await expect(page.locator(".tools > .playlist")).toBeVisible();
 });
 
 test("the search is never collapsed and stays usable at 360px", async ({ page }) => {
@@ -399,7 +423,7 @@ test("the search is never collapsed and stays usable at 360px", async ({ page })
 
 test("the collapsed theme and list-mode controls still work", async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 820 });
-  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(COLLAPSIBLES.length);
 
   await page.click("#toolsMore");
   await expect(page.locator("#toolsPanel")).toBeVisible();
@@ -437,7 +461,7 @@ test("the collapsed theme and list-mode controls still work", async ({ page }) =
 
 test("the panel closes on outside click and on Escape", async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 820 });
-  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(COLLAPSIBLES.length);
 
   await page.click("#toolsMore");
   await expect(page.locator("#toolsPanel")).toBeVisible();
@@ -456,7 +480,7 @@ test("Escape closes one layer at a time", async ({ page }) => {
    * own ran first and set listModeMenu.hidden synchronously, so the panel's
    * guard on that flag always read true and a single press collapsed both. */
   await page.setViewportSize({ width: 400, height: 820 });
-  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(COLLAPSIBLES.length);
 
   await page.click("#toolsMore");
   await page.click("#listModeMore");
@@ -474,7 +498,7 @@ test("Escape closes one layer at a time", async ({ page }) => {
 
 test("closing the panel does not strand the picker open behind it", async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 820 });
-  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(COLLAPSIBLES.length);
 
   await page.click("#toolsMore");
   await page.click("#listModeMore");
@@ -492,7 +516,7 @@ test("closing the panel does not strand the picker open behind it", async ({ pag
 
 test("widening with the picker open leaves nothing floating", async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 820 });
-  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(COLLAPSIBLES.length);
   await page.click("#toolsMore");
   await page.click("#listModeMore");
   await expect(page.locator("#listModeMenu")).toBeVisible();
@@ -511,7 +535,7 @@ test("a reflow does not throw keyboard focus away", async ({ page }) => {
    * changes nothing at all was destroying focus — which on a phone fires from
    * URL-bar collapse, the on-screen keyboard, and rotation. */
   await page.setViewportSize({ width: 400, height: 820 });
-  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(2);
+  await expect.poll(() => page.locator("#toolsPanel > *").count()).toBe(COLLAPSIBLES.length);
 
   await page.focus("#toolsMore");
   await page.setViewportSize({ width: 398, height: 820 });

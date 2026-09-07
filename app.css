@@ -315,7 +315,8 @@ button { font: inherit; color: inherit; }
 }
 .tools > * { flex: none; }
 
-.search {
+.search,
+.pl-field {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -331,7 +332,8 @@ button { font: inherit; color: inherit; }
   border: 1px solid var(--line);
   border-radius: var(--r);
 }
-.search:focus-within { border-color: var(--accent); }
+.search:focus-within,
+.pl-field:focus-within { border-color: var(--accent); }
 .search-ico {
   width: 15px; height: 15px;
   flex: none;
@@ -340,7 +342,8 @@ button { font: inherit; color: inherit; }
   stroke-width: 2;
   stroke-linecap: round;
 }
-.search input {
+.search input,
+.pl-field input {
   appearance: none;
   border: 0;
   background: none;
@@ -350,7 +353,8 @@ button { font: inherit; color: inherit; }
   font: inherit;
   font-size: 14px;
 }
-.search input::placeholder { color: var(--ink-3); }
+.search input::placeholder,
+.pl-field input::placeholder { color: var(--ink-3); }
 
 .switch {
   position: relative;
@@ -361,7 +365,8 @@ button { font: inherit; color: inherit; }
   background: var(--sunk);
 }
 .switch button,
-.listmode > button {
+.listmode > button,
+.playlist > button {
   appearance: none;
   border: 0;
   background: none;
@@ -377,10 +382,13 @@ button { font: inherit; color: inherit; }
   transition: background .15s var(--ease), color .15s var(--ease);
 }
 .switch button + button,
+.playlist > button + button,
 .listmode > button + button { border-left: 1px solid var(--line); }
 .switch button:hover,
+.playlist > button:hover,
 .listmode > button:hover { color: var(--ink); }
 .switch button[aria-pressed="true"],
+.playlist > button.is-active,
 .listmode > button.is-active {
   background: var(--check);
   color: var(--check-ink);
@@ -390,26 +398,31 @@ button { font: inherit; color: inherit; }
 /* The list-mode control deliberately does NOT use .switch: that sets
    overflow:hidden for its rounded corners, which clipped this menu away
    entirely. Same look, own box, corners rounded per-child instead. */
-.listmode {
+.listmode,
+.playlist {
   position: relative;
   display: inline-flex;
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--sunk);
 }
-.listmode > button:first-of-type {
+.listmode > button:first-of-type,
+.playlist > button:first-of-type {
   border-radius: calc(var(--r) - 1px) 0 0 calc(var(--r) - 1px);
 }
-.listmode > button:last-of-type {
+.listmode > button:last-of-type,
+.playlist > button:last-of-type {
   border-radius: 0 calc(var(--r) - 1px) calc(var(--r) - 1px) 0;
 }
 
-.listmode-more {
+.listmode-more,
+.pl-caret {
   padding: 0 6px;
   display: grid;
   place-items: center;
 }
-.listmode-more svg {
+.listmode-more svg,
+.pl-caret svg {
   width: 12px; height: 12px;
   fill: none;
   stroke: currentColor;
@@ -418,9 +431,11 @@ button { font: inherit; color: inherit; }
   stroke-linejoin: round;
   transition: transform .16s var(--ease);
 }
-.listmode-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+.listmode-more[aria-expanded="true"] svg,
+.pl-caret[aria-expanded="true"] svg { transform: rotate(180deg); }
 
-.listmode-menu {
+.listmode-menu,
+.pl-menu {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
@@ -434,8 +449,10 @@ button { font: inherit; color: inherit; }
   box-shadow: var(--shadow);
   overflow: hidden;
 }
-.listmode-menu[hidden] { display: none; }
-.listmode-menu button {
+.listmode-menu[hidden],
+.pl-menu[hidden] { display: none; }
+.listmode-menu button,
+.pl-menu button {
   appearance: none;
   border: 0;
   height: auto;
@@ -449,8 +466,10 @@ button { font: inherit; color: inherit; }
   letter-spacing: .09em;
   text-transform: uppercase;
 }
-.listmode-menu button:hover { background: var(--sunk); color: var(--ink); }
-.listmode-menu button[aria-current="true"] { color: var(--accent); }
+.listmode-menu button:hover,
+.pl-menu button:hover { background: var(--sunk); color: var(--ink); }
+.listmode-menu button[aria-current="true"],
+.pl-menu button[aria-current="true"] { color: var(--accent); }
 
 /* a painter's palette straddling the divider between the two themes */
 .skin-switch { position: relative; }
@@ -1427,7 +1446,8 @@ main {
 .tools-panel .switch button,
 .tools-panel .listmode > button { flex: 1 1 auto; white-space: nowrap; }
 /* the picker drops from the panel, not from a bar that is no longer above it */
-.tools-panel .listmode-menu { top: calc(100% + 4px); right: 0; }
+.tools-panel .listmode-menu,
+.tools-panel .pl-menu { top: calc(100% + 4px); right: 0; }
 
 @media (max-width: 560px) {
   .brand-note { display: none; }   /* the count also lives in the statusbar */
@@ -1632,3 +1652,89 @@ main {
   color: var(--ink-3);
 }
 .swap-note:empty { display: none; }
+
+/* ------------------------------------------------------------- playlists */
+
+/* The playlist picker reuses .listmode wholesale — same pill, same caret, same
+   floating menu — because it is the same interaction: a current value plus a
+   short list to change it to. Only the two things that differ are set here. */
+.playlist .pl-pill {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pl-menu { min-width: 172px; }
+.pl-menu .pl-add {
+  border-top: 1px solid var(--line);
+  color: var(--accent);
+}
+
+#plModal { margin: auto; width: min(430px, calc(100vw - 36px)); }
+
+.pl-body { padding: 14px 16px 4px; overflow-y: auto; }
+
+.pl-types {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.pl-types > button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+}
+.pl-types > button:hover { background: var(--sunk); color: var(--ink); }
+.pl-types > button[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--sunk);
+  color: var(--ink);
+}
+/* Placeholders are shown rather than hidden, and selectable rather than dead:
+   the point is that the shape of the feature is visible before the work is
+   done, and picking one should say why it cannot run rather than ignore the
+   click. Muted, not removed. */
+.pl-types > button[data-placeholder] .pl-type-name { color: var(--ink-3); }
+.pl-type-name { font-size: 13px; }
+.pl-type-note {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+}
+
+.pl-field { flex: none; width: 100%; max-width: none; box-sizing: border-box; }
+.pl-hint {
+  margin: 8px 2px 0;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: .05em;
+  color: var(--ink-3);
+}
+
+.pl-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px 14px;
+}
+.pl-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: .05em;
+  color: var(--ink-3);
+}
+.pl-status.is-bad { color: var(--dead); }
