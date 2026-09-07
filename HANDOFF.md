@@ -164,12 +164,7 @@ is not a listen* — would ship untested.
    "Track list visibility" no longer describes the group it sits in.
 3. **Delete `PR-BODY.md`** — it was a stopgap for a machine without `gh`, and
    `gh` is now installed.
-4. **Decide what to do with `.claude/launch.json`.** It was added on
-   2026-09-07 so the Browser pane can start `tools/serve.py` on port 8412
-   without the config being re-derived each session. It is untracked and
-   `.gitignore` does not cover `.claude/`, so it shows as a dirty tree. Commit
-   it or ignore it.
-5. **No favicon.** The browser requests `/favicon.ico` on every load and gets a
+4. **No favicon.** The browser requests `/favicon.ico` on every load and gets a
    404. Cosmetic only.
 
 ## Next step
