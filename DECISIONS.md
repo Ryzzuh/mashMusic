@@ -6,6 +6,53 @@ to undo it.
 
 ---
 
+## 2026-09-07 — isHittable() is strict, with no way to loosen it
+
+**Ambiguous:** `isHittable()` in `tests/helpers.js` passed on three conditions —
+the hit-tested element being the target, a descendant of it, or an *ancestor* of
+it. The ancestor clause is unsound, because an ancestor is exactly what
+`document.elementFromPoint` returns when the target is not participating in
+hit-testing: `pointer-events: none`, `visibility: hidden`, nothing painted. The
+helper's pass condition and its failure mode were the same observation, and it
+had already agreed that a `pointer-events: none` theme palette was clickable.
+Unclear how many of the assertions leaned on that clause, and whether the fix
+should be a strict variant, an opt-in flag, or a plain deletion.
+
+**Chosen:** deleted the ancestor clause outright. No `allowAncestor` option, no
+second `isTopmost()` helper.
+
+**Why:** a census settled it. Instrumenting the helper to report which clause
+satisfied each call and running the six covering spec files gave 13 hits on the
+element itself, 5 on a descendant, and **0 on an ancestor** — every one of the
+88 tests passed with the clause already removed. Nothing was relying on it, so
+it bought no coverage and cost a real defect. An opt-in flag was drafted and
+then dropped for the same reason the hole existed in the first place: a lever
+that loosens the guard is what gets reached for when the guard goes red.
+
+The descendant clause was kept and is load-bearing — five sites need it,
+including the palette, whose centre lands on its own `ellipse.pal-body`. A
+helper demanding `hit === el` would have broken it.
+
+**Also:** the inline `elementFromPoint` check in `tests/topbar.spec.js` existed
+only because the helper was too lenient, so it now calls the helper — which
+makes the palette an eighteenth call site rather than a workaround. The
+`pointer-events` mutation check was rewritten as a pure addition anchored on
+`.skin-badge {` (it previously also deleted a `drop-shadow`, and compound
+mutations have produced a false conclusion here before), and a second check was
+added on `.wheel-spin` so a helper tuned to the palette alone would show MISSED.
+Both are CAUGHT.
+
+**Not done:** the helper still probes the centre only and cannot see an edge
+hanging off screen. A `within:` bounds option was drafted and dropped — the
+existing loop in `tests/transport.spec.js` walks every `.tflank` child, which is
+broader than anything a per-selector option would check.
+
+**To reverse:** restore `hit.contains(el)` to the `ok` condition in
+`tests/helpers.js`. Expect both `pointer-events` mutation checks to turn MISSED
+immediately, which is the point of them.
+
+---
+
 ## 2026-09-07 — The palette is the control; the wrapper is gone
 
 **Asked for:** the SVG itself clickable rather than a wrapping element, the

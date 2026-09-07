@@ -18,7 +18,7 @@ open. That is the state as of this writing.
 
 - All nine milestones of the feature spec (Jukebox 1, 2, 3, 11; QoL 1, 2, 4, 5,
   6, 7, 8, 10; touchups 1, 2).
-- 130 Playwright tests, 50 mutation checks in `tools/mutate.sh`, all passing.
+- 130 Playwright tests, 51 mutation checks in `tools/mutate.sh`, all passing.
 - Fonts self-hosted in `assets/fonts/`.
 - SoundCloud spectral envelopes merged into `Ryzzuh/mashMusic-eq` `main` and
   serving: 241/312 SoundCloud tracks (77%), 633/945 YouTube (66%).
@@ -36,7 +36,6 @@ control).
 - The YouTube half of replacement search. `tools/find-replacements.mjs` is
   written and tested against a stubbed response but **has never been run** — it
   needs a YouTube Data API key. `data/replacements.json` does not exist.
-- `isHittable()` hardening (see Open TODOs).
 
 **Rollback:** both repos carry the tag `pre-spec-2026-09-03`.
 `Ryzzuh/mashMusic` at that tag is commit `537acf6` — the exact build that was
@@ -134,7 +133,7 @@ is not a listen* — would ship untested.
 | `tools/build-envelopes.py` | Offline spectral analysis → `mashMusic-eq`. |
 | `tools/find-replacements.mjs` | YouTube replacement search. **Never run; needs an API key.** |
 | `tools/serve.py` | Dev server; no-store, maps `/mashMusic-eq/`. |
-| `tests/helpers.js` | Shared helpers. `isHittable()` has a known weakness. |
+| `tests/helpers.js` | Shared helpers. `isHittable()` is strict; do not add an opt-out. |
 | `DECISIONS.md` | 54 entries, newest first. Read before relitigating anything. |
 | `legacy/` | The 2015 AngularJS original, preserved. |
 | `PR-BODY.md` | Description used for PR #1. Historical; safe to delete. |
@@ -158,24 +157,24 @@ is not a listen* — would ship untested.
 
 ## Open TODOs
 
-1. **Harden `isHittable()` in `tests/helpers.js`.** Its `hit.contains(el)` clause
-   returns true when the topmost element is an *ancestor*, which is exactly what
-   happens when a control is unclickable — it passed for a `pointer-events: none`
-   palette with clicks landing on `DIV.switch`. 20 assertions across 6 files
-   depend on current behaviour, so each call site needs checking. This suite has
-   shipped invisible controls twice; the guard should be trustworthy.
-2. **Run `tools/find-replacements.mjs`** once a YouTube Data API key is
+1. **Run `tools/find-replacements.mjs`** once a YouTube Data API key is
    available, then commit `data/replacements.json`. Mind the 100-units-per-call
-   quota.
-3. **Consider renaming the HIDDEN list mode.** It no longer hides titles, and
+   quota. Blocked on the key; nothing else stands in the way.
+2. **Consider renaming the HIDDEN list mode.** It no longer hides titles, and
    "Track list visibility" no longer describes the group it sits in.
-4. **Delete `PR-BODY.md`** — it was a stopgap for a machine without `gh`, and
+3. **Delete `PR-BODY.md`** — it was a stopgap for a machine without `gh`, and
    `gh` is now installed.
+4. **Decide what to do with `.claude/launch.json`.** It was added on
+   2026-09-07 so the Browser pane can start `tools/serve.py` on port 8412
+   without the config being re-derived each session. It is untracked and
+   `.gitignore` does not cover `.claude/`, so it shows as a dirty tree. Commit
+   it or ignore it.
+5. **No favicon.** The browser requests `/favicon.ico` on every load and gets a
+   404. Cosmetic only.
 
 ## Next step
 
-Item 1: open `tests/helpers.js`, read `isHittable()`, and enumerate its 20 call
-sites with `grep -rn isHittable tests/`. For each, decide whether an ancestor hit
-should legitimately pass. Then tighten the helper, or split it into
-`isHittable()` and a strict `isTopmost()`, and add a mutation check that sets
-`pointer-events: none` on a control and requires the suite to go red.
+Nothing is blocking. The largest remaining item, running
+`tools/find-replacements.mjs`, needs a YouTube Data API key that is not on this
+machine; ask Rhys for one before starting it. Everything else in Open TODOs is
+small and independent.

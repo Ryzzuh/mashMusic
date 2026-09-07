@@ -57,11 +57,16 @@ requires the covering test to fail. It has caught eleven tests that passed for
 the wrong reason, including several written minutes earlier. Add a check for
 every non-trivial assertion.
 
-Known weakness: **`isHittable()` in `tests/helpers.js` accepts a hit on an
-ancestor** (`hit.contains(el)`), so it can pass for an element that cannot be
-clicked — `elementFromPoint` returns the thing behind it. 20 assertions across
-6 files rely on current behaviour. Where it matters, assert strictly that the
-topmost element *is* the target.
+**`isHittable()` in `tests/helpers.js` is strict and has no opt-out.** A hit on
+a descendant passes (a button covered by its own icon is still clickable); a hit
+on an *ancestor* fails, because that is what `elementFromPoint` returns when the
+target is not in the hit-test at all. It used to accept the ancestor case and
+therefore agreed with a `pointer-events: none` palette. Do not add a lenient
+flag: a census over all 18 call sites found 13 hits on self, 5 on a descendant
+and 0 on an ancestor, so nothing needs it, and an opt-out is only a lever to
+reach for when the guard goes red. Its remaining limit is that it probes the
+centre only, so it cannot see an edge hanging off screen —
+`tests/transport.spec.js` checks flank overflow separately.
 
 `tools/mutate.sh` edits `app.js` and `app.css` in place and restores from
 `.bak`. **Never run git while it is running.** A `git stash` mid-run captured a

@@ -325,12 +325,22 @@ mut 'the palette does nothing when clicked' app.js \
   '  skinBadge.addEventListener("noop", flipSkin);' \
   tests/topbar.spec.js 'switches between the two profiles'
 
+# Two checks on the same defect, deliberately. isHittable() in tests/helpers.js
+# used to accept a hit on an ancestor, which is precisely what elementFromPoint
+# returns for an unclickable element — so this mutation stayed green until the
+# helper was made strict. The second check is on a different control, so a
+# helper tuned to the palette alone would show as MISSED here.
 mut 'the palette goes back to being decoration' app.css \
-  '  cursor: pointer;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .55));' \
-  '  cursor: pointer;
+  '.skin-badge {' \
+  '.skin-badge {
   pointer-events: none;' \
   tests/topbar.spec.js 'a real target, not decoration'
+
+mut 'the Spin button stops taking clicks' app.css \
+  '.wheel-spin {' \
+  '.wheel-spin {
+  pointer-events: none;' \
+  tests/wheel.spec.js 'stays reachable on a short viewport'
 
 mut 'the palette is not placed over the join' app.js \
   '    if (first) skinBadge.style.left = first.offsetWidth + "px";' \

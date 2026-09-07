@@ -82,7 +82,25 @@ export async function playFirstMatch(page, term) {
  * Playwright's toBeVisible() checks bounding box and computed styles, which
  * does NOT model clipping by an ancestor's overflow. A menu inside an
  * overflow:hidden container passes toBeVisible() while being invisible to the
- * user; elementFromPoint is what catches that. */
+ * user; elementFromPoint is what catches that.
+ *
+ * A hit on a DESCENDANT passes: probing a button whose centre is covered by
+ * its own label or icon returns the child, and clicking the child still
+ * activates the button. Five call sites depend on this, the theme
+ * palette among them: its centre lands on its own `ellipse.pal-body`.
+ *
+ * A hit on an ANCESTOR fails, and there is deliberately no opt-out. That
+ * result is what hit-testing reports when the target is not participating in
+ * it at all — pointer-events:none, visibility:hidden, nothing painted — so
+ * accepting it makes the helper agree with the very defect it exists to find.
+ * It once left a `pointer-events: none` theme palette green. A census over
+ * every call site found 13 hits on self, 5 on a descendant and 0 on an
+ * ancestor, so nothing needed the leniency; an opt-out would only be a lever
+ * to reach for when this goes red.
+ *
+ * Known limit: the probe samples the centre only, so it cannot see an edge
+ * hanging off screen. tests/transport.spec.js checks flank overflow
+ * separately for that reason. */
 export function isHittable(page, selector) {
   return page.evaluate((sel) => {
     const el = document.querySelector(sel);
@@ -90,10 +108,14 @@ export function isHittable(page, selector) {
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height) return { ok: false, why: "zero size" };
     const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return {
-      ok: !!hit && (hit === el || el.contains(hit) || hit.contains(el)),
-      why: hit ? hit.tagName + "." + (hit.className || "") : "nothing at that point",
-    };
+    if (!hit) return { ok: false, via: "none", why: "nothing at that point" };
+    const where = hit.tagName + "." + (hit.getAttribute("class") || "");
+    if (hit === el) return { ok: true, via: "self", why: where };
+    if (el.contains(hit)) return { ok: true, via: "descendant", why: where };
+    if (hit.contains(el)) {
+      return { ok: false, via: "ancestor", why: `the centre lands on the ancestor ${where}` };
+    }
+    return { ok: false, via: "covered", why: `covered by ${where}` };
   }, selector);
 }
 
