@@ -36,12 +36,31 @@
   const K_SRC  = "mash.sources.v1";
   const K_PLAYED = "mash.played.v1";
   const K_SWAP = "mash.replacements.v1";
+  const K_CHECK = "mash.livecheck.v1";
 
-  /* Liveness: { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch> } }
-   * Seeded at runtime from the players' own error events. An offline batch
-   * check (tools/check-liveness.mjs) can drop a data/liveness.json alongside
-   * this, which is merged in on load — the two sources never disagree, since
-   * the offline file only ever adds IDs the app has not tried yet. */
+  /* Liveness:
+   *   { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch>,
+   *                 v: "playback"|"api"|"oembed" } }
+   *
+   * `v` is how the verdict was reached, and they are not equally strong:
+   *
+   *   playback  the embed actually ran, or actually failed, in this browser.
+   *             The only source that knows about this viewer's region and age
+   *             gating, so it is the last word.
+   *   api       videos.list, via the offline script. Knows embeddable and
+   *             privacyStatus, so it is the only source that can say "blocked".
+   *   oembed    the id resolves. Cheap, keyless and CORS-open, but an
+   *             embed-disabled video answers 200 exactly like a healthy one,
+   *             so an oembed "ok" means "not deleted", not "will play".
+   *
+   * A weaker source never overwrites a stronger one; see LIVE_CONF. That is
+   * what lets the in-app batch, the offline file and playback all write to one
+   * store without an "ok" from the cheapest check burying a real verdict. */
+  const LIVE_CONF = { oembed: 0, api: 1, playback: 2 };
+  /* A stored record with no `v` predates this field. Every writer that existed
+     before it was the runtime player, so it is a playback verdict — scoring it
+     as the weakest instead would let the offline file overwrite it. */
+  const conf = (rec) => (rec ? (LIVE_CONF[rec.v] ?? LIVE_CONF.playback) : -1);
   const liveness = store.read(K_LIVE, {});
   const favs = new Set(store.read(K_FAV, []));
 
@@ -208,14 +227,129 @@
     }
   }
 
-  function markLiveness(track, status, code) {
-    liveness[track.k] = { s: status, c: code ?? null, t: Date.now() };
+  function markLiveness(track, status, code, via = "playback") {
+    if (conf(liveness[track.k]) > conf({ v: via })) return;   // never downgrade
+    if (!liveness[track.k]) uncheckedCount--;
+    liveness[track.k] = { s: status, c: code ?? null, t: Date.now(), v: via };
     store.write(K_LIVE, liveness);
     const row = rowFor(track.k);
     if (row) decorateRow(row, track);
     paintStatus();
     // a track dying mid-session is the other moment the sidecar becomes useful
     if (isDead(track)) mergeReplacements();
+  }
+
+  /* ------------------------------------------------------------ oembed check
+   *
+   * Both platforms answer an oEmbed request cross-origin with no key, which is
+   * what lets a liveness check run in the page at all. The offline script
+   * exists for what this cannot see (embeddable), not for what it can.
+   *
+   * There is no quota to query — Google publishes no endpoint that reports
+   * remaining units, and oEmbed bills nothing anyway — so the budget here is
+   * our own politeness ledger rather than a real allowance: a day's worth of
+   * requests, counted locally, so a library this size cannot turn a page load
+   * into a thousand requests against someone else's servers. */
+  const CHECK_DAY_CAP = 300;
+  const CHECK_BATCH = 25;
+
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  /* Held in memory and written through. paintStatus() consults the budget on
+     every repaint, and re-reading localStorage there put a getItem plus a
+     JSON.parse in the path of every render. */
+  let ledger = (() => {
+    const led = store.read(K_CHECK, null);
+    return led && led.day === today() ? led : { day: today(), spent: 0 };
+  })();
+
+  function checkRemaining() {
+    if (ledger.day !== today()) ledger = { day: today(), spent: 0 };  // ran past midnight
+    return Math.max(0, CHECK_DAY_CAP - ledger.spent);
+  }
+
+  function spendCheck(n) {
+    checkRemaining();                       // rolls the day over if it has changed
+    ledger.spent += n;
+    store.write(K_CHECK, ledger);
+  }
+
+  const oembedUrl = (t) => t.s === "YT"
+    ? "https://www.youtube.com/oembed?format=json&url=" +
+      encodeURIComponent("https://www.youtube.com/watch?v=" + t.i)
+    : "https://soundcloud.com/oembed?format=json&url=" +
+      encodeURIComponent("https://api.soundcloud.com/tracks/" + t.i);
+
+  /* Resolves to "ok", "gone", or null when the request never got an answer.
+     A network failure must return null and not "gone": the app is offline far
+     more often than a track is deleted, and a false "gone" is sticky. */
+  async function oembedStatus(track) {
+    try {
+      const res = await fetch(oembedUrl(track), { cache: "no-store" });
+      return res.ok ? "ok" : "gone";
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* Tracks nothing has an opinion on yet. The record IS the "already checked"
+     list — every writer stamps a status and a timestamp, so a second store of
+     checked ids could only disagree with it.
+     
+     The list is built only when a batch is about to run. The COUNT is kept as
+     a running total, because paintStatus() needs it on every repaint and
+     filtering 1,257 tracks there is enough to slow rendering measurably. */
+  const uncheckedTracks = () => TRACKS.filter((t) => !liveness[t.k]);
+  let uncheckedCount = uncheckedTracks().length;
+
+  let checkRunning = false;
+
+  async function runLivenessBatch(want = CHECK_BATCH) {
+    if (checkRunning) return { checked: 0, dead: 0, reason: "already running" };
+    const pending = uncheckedTracks();
+    const budget = Math.min(want, checkRemaining(), pending.length);
+    if (budget <= 0) {
+      return { checked: 0, dead: 0, reason: pending.length ? "day budget spent" : "all checked" };
+    }
+
+    checkRunning = true;
+    paintStatus();
+    const batch = pending.slice(0, budget);
+    let checked = 0, dead = 0, cursor = 0;
+
+    async function worker() {
+      while (cursor < batch.length) {
+        const t = batch[cursor++];
+        spendCheck(1);                       // count the attempt, not the answer
+        const status = await oembedStatus(t);
+        if (!status) continue;               // unanswered: leave it unchecked
+        markLiveness(t, status, status === "gone" ? 404 : null, "oembed");
+        checked++;
+        if (status === "gone") dead++;
+        $("statNote").textContent = `checking ${checked}/${batch.length}`;
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(4, batch.length) }, worker));
+
+    checkRunning = false;
+    render(true);
+    $("statNote").textContent =
+      `checked ${checked}` + (dead ? `, ${dead} gone` : "") +
+      ` \u00b7 ${uncheckedCount} left`;
+    return { checked, dead, reason: "" };
+  }
+
+  /* Requirement 2: the selected track, alone and unbatched. Playback already
+     reports its own failures, but only after the fact — a dead embed takes the
+     9s watchdog to admit it. This runs alongside the load and can flag the
+     track in a fraction of that, and costs one request. */
+  async function checkOne(track) {
+    if (liveness[track.k] || checkRemaining() <= 0) return;
+    spendCheck(1);
+    const status = await oembedStatus(track);
+    if (!status) return;
+    markLiveness(track, status, status === "gone" ? 404 : null, "oembed");
+    if (status === "gone" && state.current === track) flagCurrent("gone");
   }
 
   async function mergeOfflineLiveness() {
@@ -225,10 +359,18 @@
       const remote = await res.json();
       let added = 0;
       for (const [k, rec] of Object.entries(remote)) {
-        if (!liveness[k]) { liveness[k] = rec; added++; }
+        /* Adds ids nothing has tried, and upgrades an oembed "ok" — the file
+           was built from videos.list, which is the only source that can tell
+           an embed-disabled video from a healthy one. It never overrides a
+           playback verdict: that one watched the embed actually run. */
+        const incoming = { v: "api", ...rec };
+        if (conf(liveness[k]) >= conf(incoming)) continue;
+        liveness[k] = incoming;
+        added++;
       }
       if (added) {
         store.write(K_LIVE, liveness);
+        uncheckedCount = uncheckedTracks().length;   // the merge added keys
         render(true);
         $("statNote").textContent = added + " from offline check";
       }
@@ -428,10 +570,27 @@
       `showing ${state.shown} / ${state.order.length}` +
       (state.order.length !== TRACKS.length ? ` (of ${TRACKS.length})` : "");
     $("statDead").textContent = deadCount ? `${deadCount} unavailable` : "";
+    paintCheckButton();
     const pl = $("statPlayed");
     pl.hidden = !played.size;
     pl.textContent = `${played.size} played \u00b7 reset`;
     $("brandCount").textContent = `${TRACKS.length} tracks`;
+  }
+
+  function paintCheckButton() {
+    const b = $("statCheck");
+    if (!b) return;
+    const left = uncheckedCount;
+    const budget = checkRemaining();
+    b.hidden = !left;
+    if (!left) return;
+    b.disabled = checkRunning || budget <= 0;
+    b.textContent = checkRunning
+      ? "checking\u2026"
+      : `check ${Math.min(CHECK_BATCH, budget, left)} of ${left}`;
+    b.title = budget > 0
+      ? `Ask YouTube and SoundCloud whether these ids still resolve. ${budget} requests left today.`
+      : "Today's check budget is spent; it resets at midnight.";
   }
 
   // ------------------------------------------------------------------ favs
@@ -548,8 +707,9 @@
 
   function markLivenessOk(track) {
     const rec = liveness[track.k];
-    if (rec && rec.s === "ok") return;
-    liveness[track.k] = { s: "ok", c: null, t: Date.now() };
+    if (rec && rec.s === "ok" && rec.v === "playback") return;
+    if (!rec) uncheckedCount--;
+    liveness[track.k] = { s: "ok", c: null, t: Date.now(), v: "playback" };
     store.write(K_LIVE, liveness);
     const row = rowFor(track.k);
     if (row) decorateRow(row, track);
@@ -621,6 +781,7 @@
     markCurrentRow(track);
     setArtwork(track);
     loadEnvelope(track);
+    checkOne(track);            // unbatched, alongside the load — see checkOne
 
     clearTimeout(watchdog);
     // If nothing has started within 9s, the embed is silently broken.
@@ -753,6 +914,7 @@
   });
 
   $("statPlayed").addEventListener("click", resetPlayed);
+  $("statCheck").addEventListener("click", () => { runLivenessBatch(); });
 
   /* The only seam in the app that exists partly for the tests, and it is here
    * because the alternative is leaving Jukebox 3 unverified: both end events

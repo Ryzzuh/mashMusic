@@ -157,19 +157,28 @@ is not a listen* — would ship untested.
 
 ## Open TODOs
 
-1. **Run `tools/find-replacements.mjs`** once a YouTube Data API key is
-   available, then commit `data/replacements.json`. Mind the 100-units-per-call
-   quota. Blocked on the key; nothing else stands in the way.
-2. **Consider renaming the HIDDEN list mode.** It no longer hides titles, and
+1. **Populate liveness for real.** The in-app batch (the `check N of M`
+   control in the status bar) needs no key and can run today — 25 tracks a
+   click, 300 requests a day. Nothing has ever run it against the real
+   library, so `mash.liveness.v1` is empty and no track is known dead.
+2. **Run `tools/check-liveness.mjs`** with a YouTube Data API key to pick up
+   what oEmbed cannot see: videos that exist but have embedding disabled
+   (`v: "api"`, status `blocked`). ~19 quota units for the whole library. It
+   resumes, so it only costs what is still unknown.
+3. **Run `tools/find-replacements.mjs`** once step 1 or 2 has found dead
+   tracks — it only looks at tracks already marked dead, so it does nothing
+   before then. Needs the same key. 100 quota units per dead track.
+4. **Consider renaming the HIDDEN list mode.** It no longer hides titles, and
    "Track list visibility" no longer describes the group it sits in.
-3. **Delete `PR-BODY.md`** — it was a stopgap for a machine without `gh`, and
+5. **Delete `PR-BODY.md`** — it was a stopgap for a machine without `gh`, and
    `gh` is now installed.
-4. **No favicon.** The browser requests `/favicon.ico` on every load and gets a
+6. **No favicon.** The browser requests `/favicon.ico` on every load and gets a
    404. Cosmetic only.
 
 ## Next step
 
-Nothing is blocking. The largest remaining item, running
-`tools/find-replacements.mjs`, needs a YouTube Data API key that is not on this
-machine; ask Rhys for one before starting it. Everything else in Open TODOs is
-small and independent.
+Open the site and click the `check N of 1257` control in the status bar a few
+times. That needs no key and is the only way to find out how much of a
+2012-2015 library still resolves — every downstream feature (the unavailable
+count, HIDDEN mode, replacement search) has so far only ever seen dead state
+that a test seeded into `localStorage`.

@@ -39,6 +39,28 @@ record — is never rewritten: `liveness.json` (which ids the platforms lost) an
 `replacements.json` (what to play instead; **not generated yet**). Both are
 merged on load and are optional.
 
+## Liveness has three writers and one store
+
+`mash.liveness.v1` is written by the players' own error events, by the in-app
+oEmbed batch, and by `data/liveness.json` from `tools/check-liveness.mjs`. Each
+record carries `v` — `playback`, `api` or `oembed` — and **no writer may lower
+a record's confidence** (`LIVE_CONF`/`conf()` in `app.js`). An `ok` from oEmbed
+means "not deleted"; an `ok` from playback means "it actually played here". If
+you add a fourth writer, give it a `v` and place it in that ordering.
+
+A record with no `v` predates the field and counts as `playback` — everything
+that wrote before it was the runtime player. Do not "tidy" that default to 0.
+
+Both platforms answer oEmbed cross-origin with no key, which is why the in-app
+check is possible at all (measured 2026-09-07; an older comment in
+`check-liveness.mjs` claiming otherwise was wrong). oEmbed answers 200 for an
+embed-disabled video exactly as for a healthy one, so it can never report
+`blocked` — that is the only reason the offline `videos.list` script still
+exists, and the only thing a YouTube API key is still needed for here.
+
+There is no endpoint that reports remaining YouTube quota. `mash.livecheck.v1`
+is our own per-day request ledger, not a reading of anything Google exposes.
+
 ## Testing discipline
 
 The suite exists because nine defects shipped in one unassisted session, several
@@ -75,6 +97,13 @@ which then produced two false conclusions.
 
 Also: check `uptime` before trusting a timing measurement. Concurrent suite runs
 drove load average to 209 and manufactured failures that looked like real bugs.
+
+But "it's load" is also the easiest wrong answer. Before accepting it: does the
+failure reproduce at the same test on a second full run, and does the suite pass
+at a *higher* load average? If both, it is not load. `paintStatus()` runs on
+every repaint and is on the critical path of most timing-sensitive tests —
+anything O(tracks) or touching `localStorage` there is a regression waiting to
+surface five minutes into a full-suite run and nowhere else.
 
 ## Fonts
 

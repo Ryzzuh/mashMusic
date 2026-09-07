@@ -362,5 +362,56 @@ mut 'the palette loses its keyboard handler' app.js \
   '    void e;' \
   tests/topbar.spec.js 'responds to the keyboard'
 
+# ---------------------------------------------------------------- liveness
+# The oembed checker writes to the same store as playback and as the offline
+# file, so the checks that matter are the ones about precedence and about not
+# recording a verdict the network never gave.
+
+mut 'the batch rechecks tracks that already have a record' app.js \
+  '  const uncheckedTracks = () => TRACKS.filter((t) => !liveness[t.k]);' \
+  '  const uncheckedTracks = () => TRACKS.slice();' \
+  tests/liveness.spec.js 'never rechecks a track that already has a record'
+
+mut 'the day budget stops limiting the batch' app.js \
+  '    const budget = Math.min(want, checkRemaining(), pending.length);' \
+  '    const budget = Math.min(want, pending.length);' \
+  tests/liveness.spec.js 'ledger caps how many'
+
+mut 'the ledger never rolls over to a new day' app.js \
+  '    return led && led.day === today() ? led : { day: today(), spent: 0 };' \
+  '    return led || { day: today(), spent: 0 };' \
+  tests/liveness.spec.js "yesterday's does not"
+
+mut 'a failed request is recorded as gone' app.js \
+  '      return res.ok ? "ok" : "gone";
+    } catch (e) {
+      return null;
+    }' \
+  '      return res.ok ? "ok" : "gone";
+    } catch (e) {
+      return "gone";
+    }' \
+  tests/liveness.spec.js 'never gets an answer records nothing'
+
+mut 'the offline file overwrites a stronger verdict' app.js \
+  '        if (conf(liveness[k]) >= conf(incoming)) continue;' \
+  '        if (false) continue;' \
+  tests/liveness.spec.js 'never a playback one'
+
+mut 'a record with no provenance is treated as the weakest' app.js \
+  '  const conf = (rec) => (rec ? (LIVE_CONF[rec.v] ?? LIVE_CONF.playback) : -1);' \
+  '  const conf = (rec) => (rec ? (LIVE_CONF[rec.v] ?? 0) : -1);' \
+  tests/liveness.spec.js 'before the provenance field survives'
+
+mut 'selecting a track no longer checks it' app.js \
+  '    checkOne(track);            // unbatched, alongside the load — see checkOne' \
+  '    void track;' \
+  tests/liveness.spec.js 'checks that track alone'
+
+mut 'the batch claims playback confidence for an oembed verdict' app.js \
+  '        markLiveness(t, status, status === "gone" ? 404 : null, "oembed");' \
+  '        markLiveness(t, status, status === "gone" ? 404 : null, "playback");' \
+  tests/liveness.spec.js 'records oembed verdicts'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi
