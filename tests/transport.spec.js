@@ -168,9 +168,21 @@ test("an active source filter is visible even where the flanks are hidden", asyn
 });
 
 test("the readouts count from the playing track's position", async ({ page }) => {
-  // ~13s alone: two row clicks, each auto-scrolled to and each waiting on the
-  // readout to repaint. That sits close enough to the 30s default to time out
-  // under full-suite load, which is a budget problem, not a behaviour one.
+  /* ~13s alone: two row clicks, each auto-scrolled to and each waiting on the
+     readout to repaint. That sits close enough to the 30s default to time out
+     under full-suite load, which is a budget problem, not a behaviour one.
+
+     The poll below carries its own budget for the same reason. expect.poll
+     defaults to 10s regardless of test.setTimeout, and this test failed three
+     full-suite runs on that default while passing alone, in pairs, and across
+     the last seven spec files together. Raising it does not weaken the claim —
+     the readout must still reach exactly 1252 and then exactly 1226, and the
+     "positionOf always returns 0" mutation check is still CAUGHT. Two wrong
+     diagnoses were made before landing here: machine load (it reproduced at
+     the same test on a second run, and later passed at a higher load average)
+     and the checkOne() call added to play() (disabling it reproduced the
+     failure anyway). The mechanism is still not established, which is why the
+     catch block below exists — the next failure should explain itself. */
   test.setTimeout(60_000);
   const tracksLeft = () =>
     page.evaluate(() => Number(document.getElementById("mTracksLeft").textContent));
@@ -181,7 +193,20 @@ test("the readouts count from the playing track's position", async ({ page }) =>
   // filter alone, so replacing positionOf() with 0 left the old test green.
   for (const [nth, expected] of [[4, 1252], [30, 1226]]) {
     await page.locator(".trow").nth(nth).click();
-    await expect.poll(tracksLeft).toBe(expected);
+    try {
+      await expect.poll(tracksLeft, { timeout: 30_000 }).toBe(expected);
+    } catch (e) {
+      /* 1257 means either nothing is playing or the playing track has left
+         the view, and those have very different causes. Say which. */
+      const diag = await page.evaluate(() => ({
+        nowPlaying: document.getElementById("npTitle").textContent,
+        currentRows: document.querySelectorAll(".trow.is-current").length,
+        rendered: document.querySelectorAll(".trow").length,
+        listMode: document.querySelector(".tracklist").className,
+        liveness: localStorage.getItem("mash.liveness.v1"),
+      }));
+      throw new Error(`row ${nth}: ${e.message}\nDIAG ${JSON.stringify(diag)}`);
+    }
   }
   await expect(page.locator("#mTrackRemain")).not.toHaveText("--:--");
 });

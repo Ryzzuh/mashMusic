@@ -14,7 +14,23 @@ import { defineConfig, devices } from "@playwright/test";
  * build is not available for macOS 13, which this machine runs. */
 export default defineConfig({
   testDir: "./tests",
-  fullyParallel: false,        // one dev server, and several tests drive playback
+  /* One worker, measured rather than assumed. This machine has 2 physical
+     cores and 8GB, and the suite already drives load average past 15 on its
+     own. Measured 2026-09-07, same commit, threaded dev server:
+
+       workers: 1   6.0 min wall, 410s CPU, load ~15
+       workers: 2   5.8 min wall, 508s CPU, load ~48
+
+     3% off the wall clock for 24% more CPU, on a machine whose other apps
+     have to keep running. Higher load is also what makes the timing-sensitive
+     tests flake, so parallelism here buys a worse suite, not a faster one.
+
+     The thing that actually was slow: tools/serve.py used a single-threaded
+     HTTPServer, which serialised every asset request from a browser that
+     opens ~6 connections. Making it threaded took the suite from 7.7 to 6.0
+     min and cleared a test that had been failing full runs. Fix the server
+     before reaching for workers. */
+  fullyParallel: false,        // several tests drive playback; keep file order
   workers: 1,
   timeout: 30_000,
   expect: { timeout: 10_000 },

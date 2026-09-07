@@ -6,6 +6,156 @@ to undo it.
 
 ---
 
+## 2026-09-07 — Liveness is checked in two places, and verdicts carry provenance
+
+**Asked for:** check-liveness to work two ways — as a batch that estimates
+remaining quota, sizes itself accordingly and never rechecks a track it has
+already checked (with the record kept in `localStorage`), and as a single
+unbatched check on whichever track is selected for playback.
+
+**What the requirements collided with:** `tools/check-liveness.mjs` is a Node
+script, and Node has no `localStorage`. Taken literally the batch requirement
+could not be built where the batch lived.
+
+**Measured, and it changed the answer.** The script's header claimed both
+endpoints were CORS-blocked from the browser. That is false. From the page's
+own origin on 2026-09-07: `googleapis.com/youtube/v3/videos` answers (403
+without a key), `youtube.com/oembed` answers 200, `soundcloud.com/oembed`
+answers. So an in-page check is possible for both sources — and via oEmbed it
+needs no key and bills no quota, which removes the dependency that had blocked
+this work for days. Verified further: `youtube.com/oembed` returns 400 for a
+nonexistent id, but **200 for an embed-disabled video**, so it can say "gone"
+and can never say "blocked".
+
+**Chosen:** both, with a confidence ordering rather than a single winner.
+
+- The **in-app batch** (`runLivenessBatch`) asks oEmbed about tracks nothing has
+  an opinion on yet. Records are tagged `v: "oembed"`.
+- **Playing a track** fires one unbatched check alongside the load
+  (`checkOne`). Note this was already half-solved: the players' own error
+  events have always written liveness. What they could not do is report before
+  the fact — a dead embed took the 9s watchdog to admit it. Tagged `v:
+  "oembed"`; the player's own verdict, when it arrives, is `v: "playback"`.
+- The **offline script** keeps earning its place for exactly one thing:
+  `videos.list` reports `embeddable` and `privacyStatus`, which is the only way
+  to learn a video exists but cannot be embedded. Tagged `v: "api"`.
+
+**Why provenance rather than last-write-wins:** an `ok` from oEmbed means "not
+deleted"; an `ok` from playback means "it actually played, here, for this
+viewer, past region and age gating". Flattening both into `s: "ok"` would let
+the cheapest check bury the strongest verdict. `LIVE_CONF` orders them
+playback > api > oembed, and no writer may lower a record's confidence. This is
+what lets three independent writers share one store.
+
+**Migration trap, caught before shipping:** records written before `v` existed
+have no `v`. Scoring those as the weakest would have let the offline file
+overwrite real playback verdicts for every existing user. `conf()` defaults a
+missing `v` to `playback`, because every writer that existed before the field
+was the runtime player. There is a test and a mutation check for this.
+
+**On "estimate remaining quota":** there is no endpoint that reports remaining
+YouTube quota — Google publishes none, so any figure is our own bookkeeping.
+With oEmbed there is no quota at all, so the honest translation of the
+requirement is a politeness ledger: `mash.livecheck.v1` counts requests per
+day against a self-imposed 300, resetting on date change, so a 1,257-track
+library cannot turn a page load into a thousand requests against someone
+else's servers. The batch takes `min(25, remaining, unchecked)`.
+
+**On "keep a record of checked tracks":** no second store was added. The
+liveness record *is* the record of what has been checked — every writer stamps
+a status and a timestamp, and the key (`"YT:<id>"` / `"SC:<id>"`) already
+carries both the id and the source. A parallel list of checked ids could only
+ever disagree with it.
+
+**The batch is manual, not automatic.** It runs from a control in the status
+bar. Firing cross-origin requests at two third parties on every page load,
+without the reader asking, is not a default worth taking — and it would also
+put the network in the path of every test.
+
+**The offline script now resumes.** It was `const out = {}` — every run checked
+all 1,257 tracks and overwrote the file. It now loads the existing file, skips
+what is already recorded, honours `--limit`, and takes `--recheck` to start
+over.
+
+**A regression this introduced, and how it was found:** `paintCheckButton()`
+was called from `paintStatus()` and recomputed the unchecked count by filtering
+all 1,257 tracks, plus a `localStorage` read and `JSON.parse`, on every repaint.
+`tests/transport.spec.js` "the readouts count from the playing track's
+position" then failed in the full suite twice, while passing alone and in
+pairs. Three notes on the diagnosis, because two of the steps were wrong:
+
+- The first hypothesis was machine load. It was not: the failure reproduced at
+  the same test on a second full run, and the suite later passed at a *higher*
+  load average than either failing run.
+- The second hypothesis was `checkOne()` in `play()`. Disabling it and running
+  the full suite reproduced the failure anyway, which exonerated it.
+- The microbenchmark of the O(n) painter said 0.42 ms per interaction, which
+  is far too small to explain a 10 s poll timeout — so the mechanism is still
+  not established. What is established is the correlation: the failure
+  reproduced twice with the O(n) painter and not once across three full runs
+  with the O(1) one. The benchmark ran against an empty liveness store in an
+  idle page; the real path allocates a fresh 1,257-element array seven times
+  per interaction under whatever memory pressure 141 tests have built up.
+
+The count is now a running total maintained by the writers, and the ledger is
+held in memory and written through. Both are honest improvements regardless of
+whether they fully explain the failure.
+
+**To reverse:** the app half is `runLivenessBatch`, `checkOne`, `oembedStatus`
+and the `LIVE_CONF`/`conf` pair in `app.js`, plus `#statCheck` in
+`index.html`. Deleting them leaves the pre-existing playback-only liveness
+intact; `v` becomes vestigial but harmless, since `conf()` reads a missing one
+as `playback`.
+
+---
+
+## 2026-09-07 — isHittable() is strict, with no way to loosen it
+
+**Ambiguous:** `isHittable()` in `tests/helpers.js` passed on three conditions —
+the hit-tested element being the target, a descendant of it, or an *ancestor* of
+it. The ancestor clause is unsound, because an ancestor is exactly what
+`document.elementFromPoint` returns when the target is not participating in
+hit-testing: `pointer-events: none`, `visibility: hidden`, nothing painted. The
+helper's pass condition and its failure mode were the same observation, and it
+had already agreed that a `pointer-events: none` theme palette was clickable.
+Unclear how many of the assertions leaned on that clause, and whether the fix
+should be a strict variant, an opt-in flag, or a plain deletion.
+
+**Chosen:** deleted the ancestor clause outright. No `allowAncestor` option, no
+second `isTopmost()` helper.
+
+**Why:** a census settled it. Instrumenting the helper to report which clause
+satisfied each call and running the six covering spec files gave 13 hits on the
+element itself, 5 on a descendant, and **0 on an ancestor** — every one of the
+88 tests passed with the clause already removed. Nothing was relying on it, so
+it bought no coverage and cost a real defect. An opt-in flag was drafted and
+then dropped for the same reason the hole existed in the first place: a lever
+that loosens the guard is what gets reached for when the guard goes red.
+
+The descendant clause was kept and is load-bearing — five sites need it,
+including the palette, whose centre lands on its own `ellipse.pal-body`. A
+helper demanding `hit === el` would have broken it.
+
+**Also:** the inline `elementFromPoint` check in `tests/topbar.spec.js` existed
+only because the helper was too lenient, so it now calls the helper — which
+makes the palette an eighteenth call site rather than a workaround. The
+`pointer-events` mutation check was rewritten as a pure addition anchored on
+`.skin-badge {` (it previously also deleted a `drop-shadow`, and compound
+mutations have produced a false conclusion here before), and a second check was
+added on `.wheel-spin` so a helper tuned to the palette alone would show MISSED.
+Both are CAUGHT.
+
+**Not done:** the helper still probes the centre only and cannot see an edge
+hanging off screen. A `within:` bounds option was drafted and dropped — the
+existing loop in `tests/transport.spec.js` walks every `.tflank` child, which is
+broader than anything a per-selector option would check.
+
+**To reverse:** restore `hit.contains(el)` to the `ok` condition in
+`tests/helpers.js`. Expect both `pointer-events` mutation checks to turn MISSED
+immediately, which is the point of them.
+
+---
+
 ## 2026-09-07 — The palette is the control; the wrapper is gone
 
 **Asked for:** the SVG itself clickable rather than a wrapping element, the

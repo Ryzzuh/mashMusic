@@ -17,9 +17,20 @@ npx playwright test tests/x.spec.js -g "name"
 python3 tools/serve.py 8412         # dev server (prefer the Browser pane's preview_start)
 ```
 
-`tools/serve.py` exists rather than `python3 -m http.server` for two reasons: it
-sends `no-store`, and it maps `/mashMusic-eq/` to the sibling envelope checkout
-so the spectrum works locally.
+`tools/serve.py` exists rather than `python3 -m http.server` for three reasons:
+it sends `no-store`, it maps `/mashMusic-eq/` to the sibling envelope checkout
+so the spectrum works locally, and it is **threaded**. That last one is not
+cosmetic: the stdlib `HTTPServer` serves one request at a time, and a browser
+opens ~6 connections for index.html, app.css, app.js, the 1,257-track
+`data/tracks.js`, five fonts, the liveness sidecar and an envelope per track
+played. Serialising those cost the suite 22% and made its most timing-sensitive
+test exceed a 60s budget while taking 6.5s alone.
+
+**Do not reach for more Playwright workers.** Measured on this machine (2
+physical cores, 8GB): workers 1 = 6.0 min wall / 410s CPU / load ~15; workers 2
+= 5.8 min / 508s CPU / load ~48. 3% faster for 24% more CPU, and the extra load
+is exactly what makes the timing-sensitive tests flake. `playwright.config.js`
+carries the numbers.
 
 ## Architecture, such as it is
 
@@ -39,6 +50,28 @@ record — is never rewritten: `liveness.json` (which ids the platforms lost) an
 `replacements.json` (what to play instead; **not generated yet**). Both are
 merged on load and are optional.
 
+## Liveness has three writers and one store
+
+`mash.liveness.v1` is written by the players' own error events, by the in-app
+oEmbed batch, and by `data/liveness.json` from `tools/check-liveness.mjs`. Each
+record carries `v` — `playback`, `api` or `oembed` — and **no writer may lower
+a record's confidence** (`LIVE_CONF`/`conf()` in `app.js`). An `ok` from oEmbed
+means "not deleted"; an `ok` from playback means "it actually played here". If
+you add a fourth writer, give it a `v` and place it in that ordering.
+
+A record with no `v` predates the field and counts as `playback` — everything
+that wrote before it was the runtime player. Do not "tidy" that default to 0.
+
+Both platforms answer oEmbed cross-origin with no key, which is why the in-app
+check is possible at all (measured 2026-09-07; an older comment in
+`check-liveness.mjs` claiming otherwise was wrong). oEmbed answers 200 for an
+embed-disabled video exactly as for a healthy one, so it can never report
+`blocked` — that is the only reason the offline `videos.list` script still
+exists, and the only thing a YouTube API key is still needed for here.
+
+There is no endpoint that reports remaining YouTube quota. `mash.livecheck.v1`
+is our own per-day request ledger, not a reading of anything Google exposes.
+
 ## Testing discipline
 
 The suite exists because nine defects shipped in one unassisted session, several
@@ -57,11 +90,16 @@ requires the covering test to fail. It has caught eleven tests that passed for
 the wrong reason, including several written minutes earlier. Add a check for
 every non-trivial assertion.
 
-Known weakness: **`isHittable()` in `tests/helpers.js` accepts a hit on an
-ancestor** (`hit.contains(el)`), so it can pass for an element that cannot be
-clicked — `elementFromPoint` returns the thing behind it. 20 assertions across
-6 files rely on current behaviour. Where it matters, assert strictly that the
-topmost element *is* the target.
+**`isHittable()` in `tests/helpers.js` is strict and has no opt-out.** A hit on
+a descendant passes (a button covered by its own icon is still clickable); a hit
+on an *ancestor* fails, because that is what `elementFromPoint` returns when the
+target is not in the hit-test at all. It used to accept the ancestor case and
+therefore agreed with a `pointer-events: none` palette. Do not add a lenient
+flag: a census over all 18 call sites found 13 hits on self, 5 on a descendant
+and 0 on an ancestor, so nothing needs it, and an opt-out is only a lever to
+reach for when the guard goes red. Its remaining limit is that it probes the
+centre only, so it cannot see an edge hanging off screen —
+`tests/transport.spec.js` checks flank overflow separately.
 
 `tools/mutate.sh` edits `app.js` and `app.css` in place and restores from
 `.bak`. **Never run git while it is running.** A `git stash` mid-run captured a
@@ -70,6 +108,13 @@ which then produced two false conclusions.
 
 Also: check `uptime` before trusting a timing measurement. Concurrent suite runs
 drove load average to 209 and manufactured failures that looked like real bugs.
+
+But "it's load" is also the easiest wrong answer. Before accepting it: does the
+failure reproduce at the same test on a second full run, and does the suite pass
+at a *higher* load average? If both, it is not load. `paintStatus()` runs on
+every repaint and is on the critical path of most timing-sensitive tests —
+anything O(tracks) or touching `localStorage` there is a regression waiting to
+surface five minutes into a full-suite run and nowhere else.
 
 ## Fonts
 

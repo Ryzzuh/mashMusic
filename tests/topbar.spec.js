@@ -111,21 +111,10 @@ test("the palette switches between the two profiles", async ({ page }) => {
 });
 
 test("the palette is a real target, not decoration", async ({ page }) => {
-  /* isHittable() is not strict enough for this one. It accepts a hit on an
-   * ancestor (`hit.contains(el)`), and an unclickable control is exactly the
-   * case where elementFromPoint returns the ancestor behind it — so restoring
-   * pointer-events:none left that assertion green. The topmost element at the
-   * palette's centre has to BE the palette. */
-  const hit = await page.evaluate(() => {
-    const el = document.getElementById("skinBadge");
-    const r = el.getBoundingClientRect();          // #skinBadge is the svg now
-    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return {
-      insideBadge: !!top && el.contains(top),
-      landedOn: top ? (top.id || `${top.tagName}.${top.getAttribute("class") || ""}`) : "nothing",
-    };
-  });
-  expect(hit.insideBadge, `a click there lands on ${hit.landedOn}`).toBe(true);
+  /* This was an inline elementFromPoint check because isHittable() used to
+     accept a hit on an ancestor, which is the exact result an unclickable
+     control produces. The helper is strict now, so it carries the claim. */
+  expect(await isHittable(page, "#skinBadge")).toMatchObject({ ok: true });
 
   /* The palette is 24x20 — under WCAG 2.5.8's 24x24. That is allowed here by
      the criterion's own "Equivalent" exception: the same function is available
