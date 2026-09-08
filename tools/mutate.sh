@@ -591,5 +591,31 @@ mut 'resolved durations are held in memory until the run ends' app.js \
   '        sinceWrite++;' \
   tests/playlist.spec.js 'saved as they resolve'
 
+# ------------------------------------------------------- metadata sidecar
+
+mut 'the committed sidecar is ignored on import' app.js \
+  "    applyMeta();" \
+  "    void 0;" \
+  tests/playlist.spec.js 'no lookups at all'
+
+mut 'the sidecar never reaches an already-imported playlist' app.js \
+  '    if (applyMeta()) { rebuildLibrary(); render(true); }' \
+  '    void 0;' \
+  tests/playlist.spec.js 'imported before it existed'
+
+# This ordering is the bug that shipped in the first draft: with the check
+# below the short-circuit, an import that pre-filled its fields from the
+# sidecar skipped every embeddable verdict.
+mut 'embeddable is checked after the already-applied short-circuit' app.js \
+  '      if (m.e === false) {
+        markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
+      }
+      if (rec.t === m.t && rec.d === m.d) continue;      // fields already applied' \
+  '      if (rec.t === m.t && rec.d === m.d) continue;
+      if (m.e === false) {
+        markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
+      }' \
+  tests/playlist.spec.js 'applied on every load'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

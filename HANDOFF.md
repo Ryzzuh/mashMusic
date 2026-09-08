@@ -18,7 +18,7 @@ open. That is the state as of this writing.
 
 - All nine milestones of the feature spec (Jukebox 1, 2, 3, 11; QoL 1, 2, 4, 5,
   6, 7, 8, 10; touchups 1, 2).
-- 171 Playwright tests, 80 mutation checks in `tools/mutate.sh`, all passing.
+- 182 Playwright tests, 92 mutation checks in `tools/mutate.sh`, all passing.
 - Fonts self-hosted in `assets/fonts/`.
 - SoundCloud spectral envelopes merged into `Ryzzuh/mashMusic-eq` `main` and
   serving: 241/312 SoundCloud tracks (77%), 633/945 YouTube (66%).
@@ -158,7 +158,14 @@ is not a listen* — would ship untested.
 
 ## Open TODOs
 
-0. **Create one public Google Sheet with YouTube ids in it** and import it
+0. **Run `tools/resolve-meta.mjs` with a YouTube API key** and commit
+   `data/meta.json`. Free key, no card; 2,007 tracks costs 41 of a
+   10,000/day allowance. This is the one place a key is needed — every other
+   machine and every visitor then resolves titles and durations instantly with
+   no key. The tool has never made a `videos.list` call (no key on this
+   machine); its sheet half and the whole app-side merge are verified.
+
+0b. **Create one public Google Sheet with YouTube ids in it** and import it
    through the UI. This is the only unproven part of the playlist feature: the
    Sheets fetch and the oEmbed lookup are each verified against the real
    services, but their combination is only tested against stubs, because no

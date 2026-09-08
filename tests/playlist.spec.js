@@ -497,3 +497,135 @@ test("durations are saved as they resolve, not only when the run ends", async ({
   const partial = Object.values(await importedStore(page)).filter((v) => v.d > 0).length;
   expect(partial).toBeLessThan(30);             // and the run is still going
 });
+
+
+/* ---------------------------------------------------- the metadata sidecar */
+
+/** Serve data/meta.json, as tools/resolve-meta.mjs would have written it. */
+async function stubMeta(page, body) {
+  await page.route("**/data/meta.json", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) }));
+}
+
+test("a committed sidecar resolves an import with no lookups at all", async ({ page }) => {
+  /* The point of tools/resolve-meta.mjs: run it once where a key exists,
+     commit the output, and every other machine resolves instantly without a
+     key, without oEmbed and without cueing anything. */
+  await stubMeta(page, {
+    "YT:AAAAAAAAAAA": { t: "Real Title A", v: "Real Channel", d: 253, a: "", e: true },
+    "YT:BBBBBBBBBBB": { t: "Real Title B", v: "Real Channel", d: 411, a: "", e: true },
+  });
+  await fakeYT(page, {});                       // any cue would hang, proving none happens
+  await page.reload();
+
+  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\n");
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(2);
+
+  await expect(page.locator(".trow").first()).toContainText("Real Title A");
+  await expect(page.locator('.trow[data-key="YT:AAAAAAAAAAA"] .t-dur')).toHaveText("4:13");
+  await expect(page.locator('.trow[data-key="YT:BBBBBBBBBBB"] .t-dur')).toHaveText("6:51");
+
+  expect(asked).toEqual([]);                    // oEmbed was never called
+  const cued = await page.evaluate(() => window.__yt.cued);
+  expect(cued).toEqual([]);                     // and nothing was cued
+});
+
+test("the sidecar carries embeddable, which neither oEmbed nor a cue reports", async ({ page }) => {
+  await stubMeta(page, {
+    "YT:AAAAAAAAAAA": { t: "Fine", v: "C", d: 100, a: "", e: true },
+    "YT:BBBBBBBBBBB": { t: "Embedding off", v: "C", d: 200, a: "", e: false },
+    "YT:CCCCCCCCCCC": { gone: true },
+  });
+  await fakeYT(page, {});
+  await page.reload();
+  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\nCCCCCCCCCCC\n");
+  await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(3);
+
+  await expect.poll(async () => {
+    const l = await page.evaluate(() => JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
+    return l["YT:BBBBBBBBBBB"]?.s;
+  }).toBe("blocked");
+  const live = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
+  expect(live["YT:BBBBBBBBBBB"]).toMatchObject({ s: "blocked", v: "api" });
+  expect(live["YT:CCCCCCCCCCC"]).toMatchObject({ s: "gone", v: "api" });
+  expect(live["YT:AAAAAAAAAAA"]).toBeUndefined();
+  await expect(page.locator("#statDead")).toHaveText("2 unavailable");
+});
+
+test("the sidecar fixes up a playlist imported before it existed", async ({ page }) => {
+  /* The machine that imported first has oEmbed titles and no durations. When
+     the sidecar lands it should correct them in place, not require a re-import. */
+  await page.evaluate(() => {
+    localStorage.setItem("mash.imported.v1", JSON.stringify({
+      "YT:AAAAAAAAAAA": { k: "YT:AAAAAAAAAAA", s: "YT", i: "AAAAAAAAAAA",
+                          t: "oembed title", v: "", d: 0, a: "", c: "" },
+    }));
+    localStorage.setItem("mash.playlists.v1", JSON.stringify([
+      { id: "p1", name: "Old", type: "sheets", source: "x", keys: ["YT:AAAAAAAAAAA"], added: 1 },
+    ]));
+    localStorage.setItem("mash.playlist.v1", JSON.stringify("p1"));
+  });
+  await stubMeta(page, {
+    "YT:AAAAAAAAAAA": { t: "Authoritative Title", v: "Chan", d: 321, a: "", e: true },
+  });
+  await fakeYT(page, {});
+  await page.reload();
+
+  await expect.poll(rowCount(page)).toBe(1);
+  await expect(page.locator(".t-name").first()).toHaveText("Authoritative Title");
+  await expect(page.locator(".t-dur").first()).toHaveText("5:21");
+  expect((await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(321);
+});
+
+test("no sidecar changes nothing", async ({ page }) => {
+  await page.route("**/data/meta.json", (r) => r.fulfill({ status: 404, body: "" }));
+  await fakeYT(page, { AAAAAAAAAAA: 150 });
+  await page.reload();
+  await stubSheet(page, "AAAAAAAAAAA\n");
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(1);
+
+  // falls straight back to the keyless path
+  expect(asked).toEqual(["AAAAAAAAAAA"]);
+  await expect.poll(async () => (await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(150);
+});
+
+
+test("the sidecar's verdicts are applied on every load, not only when fields change", async ({ page }) => {
+  /* A returning session: the imported records already match the sidecar
+     exactly, so the field copying is skipped. The gone/blocked verdicts must
+     still be recorded — they are facts about the track, not a side effect of
+     writing a title. Getting this order wrong meant an import that had already
+     pre-filled its fields recorded no blocked tracks at all. */
+  await page.evaluate(() => {
+    localStorage.setItem("mash.imported.v1", JSON.stringify({
+      "YT:AAAAAAAAAAA": { k: "YT:AAAAAAAAAAA", s: "YT", i: "AAAAAAAAAAA",
+                          t: "Settled", v: "C", d: 240, a: "", c: "" },
+    }));
+    localStorage.setItem("mash.playlists.v1", JSON.stringify([
+      { id: "p1", name: "Saved", type: "sheets", source: "x",
+        keys: ["YT:AAAAAAAAAAA"], added: 1 },
+    ]));
+    localStorage.setItem("mash.playlist.v1", JSON.stringify("p1"));
+    localStorage.removeItem("mash.liveness.v1");        // nothing recorded yet
+  });
+  // identical title and duration, so the copy is short-circuited
+  await stubMeta(page, {
+    "YT:AAAAAAAAAAA": { t: "Settled", v: "C", d: 240, a: "", e: false },
+  });
+  await fakeYT(page, {});
+  await page.reload();
+
+  await expect.poll(async () => {
+    const l = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
+    return l["YT:AAAAAAAAAAA"]?.s;
+  }).toBe("blocked");
+  await expect(page.locator("#statDead")).toHaveText("1 unavailable");
+});

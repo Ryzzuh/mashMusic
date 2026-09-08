@@ -760,6 +760,61 @@
     } catch (e) { return {}; }
   }
 
+  /* The committed metadata sidecar.
+   *
+   * data/meta.json is produced by tools/resolve-meta.mjs on whichever machine
+   * has a YouTube API key, and committed. It exists so a key is needed in
+   * exactly one place, once: localStorage does not sync between workstations
+   * and a key does not belong in a URL, but the RESULTS are not secret and can
+   * simply travel with the repo.
+   *
+   * Consulted before anything asks YouTube, so a machine that has never seen a
+   * playlist still shows real titles and durations the moment it imports the
+   * sheet — no oEmbed calls, no cueing, no waiting. */
+  let metaSidecar = {};
+
+  async function loadMetaSidecar() {
+    try {
+      const res = await fetch("data/meta.json", { cache: "no-store" });
+      if (!res.ok) return;
+      metaSidecar = (await res.json()) || {};
+    } catch (e) {
+      /* no sidecar, or running from file:// — everything still resolves the
+         slow way, which is the whole point of it being optional */
+    }
+    if (applyMeta()) { rebuildLibrary(); render(true); }
+  }
+
+  /** Fill imported records from the sidecar. Returns how many it changed. */
+  function applyMeta() {
+    let n = 0;
+    for (const [k, rec] of Object.entries(imported)) {
+      const m = metaSidecar[k];
+      if (!m) continue;
+      if (m.gone) {
+        markLiveness(TRACKS.find((x) => x.k === k) || rec, "gone", 100, "api");
+        continue;
+      }
+      /* The verdict first. This used to sit below the short-circuit, so an
+         import that had already pre-filled its fields from the sidecar skipped
+         the check entirely and never recorded a single blocked track. */
+      if (m.e === false) {
+        markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
+      }
+      if (rec.t === m.t && rec.d === m.d) continue;      // fields already applied
+      /* videos.list is the most authoritative source available — better than
+         an oEmbed title and better than a duration read off the player — so it
+         wins outright rather than only filling blanks. */
+      rec.t = m.t || rec.t;
+      rec.v = m.v || rec.v;
+      rec.d = m.d || rec.d;
+      rec.a = m.a || rec.a;
+      n++;
+    }
+    if (n) store.write(K_IMPORT, imported);
+    return n;
+  }
+
   /* Metadata backfill.
    *
    * A sheet can be any size — the one this was built against holds 2,007 ids —
@@ -1048,12 +1103,20 @@
       imported[item.k] = {
         k: item.k, s: "YT", i: item.i,
         t: "", v: "",
-        d: 0,                       // learned from the player on first play
+        d: 0,                       // else learned from the player
         a: "",
         c: new Date().toISOString().slice(0, 10),
       };
     }
     store.write(K_IMPORT, imported);
+
+    /* Before anything is asked of YouTube. If these ids were resolved on the
+       machine that has a key, this fills in every title and duration and
+       records the gone/blocked verdicts, and the oEmbed pass below then finds
+       nothing left to do. An earlier draft also pre-filled the records above
+       from the sidecar; that was the same work twice, and the mutation harness
+       showed it by failing to notice its removal. */
+    applyMeta();
 
     // Enough for the first screenful, so the list is never a wall of ids.
     const eager = fresh.slice(0, CHUNK).map((f) => f.k);
@@ -2916,6 +2979,7 @@
   render(true);
   // liveness first: it can reveal dead tracks, which is what makes the
   // replacements sidecar worth asking for at all
+  loadMetaSidecar();
   mergeOfflineLiveness().then(mergeReplacements);
   mergeReplacements();
   loadEqIndex();

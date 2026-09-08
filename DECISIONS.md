@@ -6,6 +6,69 @@ to undo it.
 
 ---
 
+## 2026-09-09 — A committed metadata sidecar, so the key lives in one place
+
+**The question that settled the design:** "how do I access the optional key
+field from other workstations?" The answer is that you cannot —
+`localStorage` does not sync between machines, browser profile sync does not
+cover it, and a key does not belong in a URL where it would land in history and
+`Referer` headers.
+
+**Verified, because it is the crux and the intuition is wrong:** OAuth does not
+help. YouTube quota is charged to the Cloud *project*, never to the signed-in
+user, so making people sign in would let them read their own data while still
+spending Rhys's 10,000/day. There is no per-user quota in the Data API. Signing
+in buys access, not capacity.
+
+**So the key was the wrong thing to distribute.** What is wanted on every
+machine is the *results*, and those are not secret. `tools/resolve-meta.mjs`
+runs once where a key exists and writes `data/meta.json`, which is committed
+and merged on load exactly like `liveness.json` and `replacements.json`.
+
+`videos.list` takes 50 ids per call, bills **one** quota unit regardless, and
+returns title, channel, duration **and `embeddable`** together — 2,007 tracks
+in 41 calls and 41 units of a free 10,000/day allowance, against ~2,000 oEmbed
+requests plus ~17 minutes of cueing a hidden player for durations the API gives
+away. It also closes the last gap: `embeddable` is the one field neither oEmbed
+nor a cue reports cleanly.
+
+**No in-app key field was built.** It was the obvious answer and it is the
+wrong one: it optimises for one machine, adds a settings surface for a
+single-user convenience, and does nothing for visitors. The sidecar helps
+everyone who opens the site and needs no UI at all.
+
+**A shape trap avoided:** the "video is gone" entry first used `{ s: "gone",
+t: 1 }`. `t` is the *title* everywhere else in this codebase, and reusing it
+for a timestamp would have been a trap for whoever read it next. It is
+`{ gone: true }`.
+
+**A bug of mine, and then the harness deleting my fix for it.** `applyMeta()`
+short-circuits when a record's title and duration already match the sidecar.
+The `embeddable` check sat below that line, so an import that had pre-filled
+its fields from the sidecar skipped every blocked verdict — caught by a test,
+fixed by moving the check above the short-circuit. Then the mutation harness
+reported that check as MISSED, because removing the pre-fill (see below) meant
+records are empty on import and the short-circuit no longer fires there. The
+ordering still matters on a later load where the fields already match, so that
+is now the scenario the test covers: **the sidecar's verdicts apply on every
+load, not only when a field changes.**
+
+**Redundant code the harness found.** The importer also pre-filled each new
+record from the sidecar. `applyMeta()` runs immediately afterwards and does the
+same work, so disabling the pre-fill changed nothing and the mutation check
+went MISSED. Removed rather than papered over — a check that cannot fail is
+telling you the code has nothing to say.
+
+**Not verified:** an actual `videos.list` response. There is no key on this
+machine, so the tool's network half has never run, exactly as
+`find-replacements.mjs` has not. What *is* verified end-to-end is the sheet
+half — run against the real 2,007-track sheet, it read every id, estimated 41
+quota units, reported the missing key clearly and wrote nothing — plus the
+pure functions (ISO-8601 durations, id extraction, sheet-ref parsing) and the
+whole app-side merge against a stubbed sidecar.
+
+---
+
 ## 2026-09-08 — Durations resolve in the background, by cueing not playing
 
 **Asked for:** batch-resolve durations silently while a playlist loads, with

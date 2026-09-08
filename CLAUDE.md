@@ -84,6 +84,18 @@ The import must not use the `mash.livecheck.v1` ledger: that is a budget for
 background politeness, and spending it on a foreground import produced a list
 of 1,900 bare ids.
 
+**`data/meta.json` is the keyed shortcut, and the reason no key is needed
+anywhere else.** `tools/resolve-meta.mjs` runs once on whichever machine has a
+YouTube API key — `videos.list`, 50 ids per call, 1 quota unit, returning
+title, channel, duration and `embeddable` together — and its output is
+committed. Every other workstation and every visitor then resolves instantly
+with no key. `localStorage` does not sync between machines and a key does not
+belong in a URL; the results are not secret, so they travel with the repo
+instead. The app consults it before asking YouTube anything, and applies its
+gone/blocked verdicts on **every** load, not only when a title changes.
+
+Everything below is the keyless fallback, used when the sidecar has no entry.
+
 **Durations come from cueing, not playing.** oEmbed has none and `videos.list`
 needs a key, but the IFrame API reports a duration from a CUED video — nothing
 streams, so it is not a view. ~0.5s per track; a 2,000-track sheet resolves in
