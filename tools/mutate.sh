@@ -467,5 +467,25 @@ mut 'any open dialog stops owning the keyboard' app.js \
   '    if (false) return;' \
   tests/playlist.spec.js 'arrow keys inside the dialog'
 
+mut 'a missing title is stored as the id' app.js \
+  '        t: "", v: "",' \
+  '        t: item.i, v: "",' \
+  tests/playlist.spec.js 'never lands leaves the track pending'
+
+mut 'a 404 title is not recorded as a dead track' app.js \
+  '          markLiveness(TRACKS.find((x) => x.k === k) || imported[k],' \
+  '          if (false) markLiveness(TRACKS.find((x) => x.k === k) || imported[k],' \
+  tests/playlist.spec.js '404s marks the track dead'
+
+mut 'an unanswered title request is recorded as dead' app.js \
+  '        } else if (res.gone) {' \
+  '        } else if (true) {' \
+  tests/playlist.spec.js 'never lands leaves the track pending'
+
+mut 'rendered rows never ask for their missing titles' app.js \
+  '    backfillRendered();' \
+  '    void 0;' \
+  tests/playlist.spec.js 'beyond the first screen arrive'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

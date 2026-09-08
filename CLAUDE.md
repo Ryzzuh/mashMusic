@@ -55,6 +55,18 @@ imported tracks.
 Use **`scopeCount()`, not `TRACKS.length`**, for anything the user reads as a
 total. `TRACKS` includes tracks imported by playlists that are not on screen.
 
+Imported titles are fetched **lazily** — the first screenful during the import,
+the rest as their rows render — so a 2,007-id sheet imports as fast as a 20-id
+one. A title that is not known yet is stored as `""` and **never as the id**;
+writing the id into the title field turns a fetch failure into permanent data.
+The import must not use the `mash.livecheck.v1` ledger: that is a budget for
+background politeness, and spending it on a foreground import produced a list
+of 1,900 bare ids.
+
+An oEmbed **404 is a liveness verdict**, not a slow title — one request both
+names the track and settles whether it exists. A request that never lands
+records nothing.
+
 Import is keyless by design: Google Sheets' gviz CSV endpoint and YouTube's
 oEmbed both answer cross-origin with no key. Two traps, both with tests:
 an unshared sheet returns an **HTML sign-in page with a 200**, and oEmbed

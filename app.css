@@ -1655,6 +1655,16 @@ main {
 
 /* ------------------------------------------------------------- playlists */
 
+/* A title that has not arrived yet. The id is shown because it is what is
+   actually known — but in the mono face used for ids elsewhere, and dimmed, so
+   it never reads as the track's name. */
+.t-name.is-pending {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .04em;
+  color: var(--ink-3);
+}
+
 /* The playlist picker reuses .listmode wholesale — same pill, same caret, same
    floating menu — because it is the same interaction: a current value plus a
    short list to change it to. Only the two things that differ are set here. */

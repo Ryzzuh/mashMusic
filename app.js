@@ -182,6 +182,10 @@
     paintPlaylist();
     buildContributors();       // the contributor universe just changed
     render(true);
+    // The idle copy names the playlist, so it goes stale on a switch unless
+    // something repaints it. Only when nothing is playing: otherwise this is
+    // the now-playing line and belongs to the track.
+    if (!state.current) $("npSub").textContent = idleCopy();
   }
 
 
@@ -555,7 +559,13 @@
     const via = document.createElement("span");
     via.className = "t-via";
 
-    name.textContent = track.t;
+    if (track.t) {
+      name.textContent = track.t;
+    } else {
+      // Title not known yet. Show what IS known, marked as provisional.
+      name.textContent = track.i;
+      name.classList.add("is-pending");
+    }
     via.textContent = track.v ? "via " + track.v : "";
     main.append(name, via);
 
@@ -630,6 +640,7 @@
     listEl.appendChild(frag);
     $("listEnd").hidden = state.shown < state.order.length;
     if (!bulkRender) paintStatus();
+    backfillRendered();
   }
 
   function render(rebuild) {
@@ -730,16 +741,106 @@
     return out;
   }
 
-  /** Title, channel and thumbnail for an id. No key; no duration available. */
+  /** Title, channel and thumbnail for an id. No key; no duration available.
+   *
+   * Returns { meta } on success, { gone: true } when YouTube says the video
+   * does not exist, and {} when the request never got an answer. Those last
+   * two must stay distinct: a 404 is permanent and worth recording, a network
+   * blip is neither. */
   async function ytMeta(id) {
     const url = "https://www.youtube.com/oembed?format=json&url=" +
       encodeURIComponent("https://www.youtube.com/watch?v=" + id);
     try {
       const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) return null;
+      if (!res.ok) return { gone: true, code: res.status };
       const j = await res.json();
-      return { t: j.title || id, v: j.author_name || "", a: j.thumbnail_url || "" };
-    } catch (e) { return null; }
+      return { meta: { t: j.title || id, v: j.author_name || "", a: j.thumbnail_url || "" } };
+    } catch (e) { return {}; }
+  }
+
+  /* Metadata backfill.
+   *
+   * A sheet can be any size — the one this was built against holds 2,007 ids —
+   * so fetching every title up front is both slow and rude. Instead every
+   * imported track starts titleless and is filled in on demand: the first
+   * screenful during the import, the rest as their rows come into view.
+   *
+   * A row that is still waiting shows its id in a muted "pending" style, which
+   * is honest about what is known, rather than putting the id where the title
+   * goes and looking like data. */
+  const metaPending = new Set();
+  const metaFailed = new Set();
+  let metaRunning = 0;
+
+  async function fillMeta(keys, onProgress) {
+    const want = keys.filter((k) => imported[k] && !imported[k].t &&
+      !metaPending.has(k) && !metaFailed.has(k));
+    if (!want.length) return 0;
+    want.forEach((k) => metaPending.add(k));
+
+    let done = 0, cursor = 0;
+    async function worker() {
+      while (cursor < want.length) {
+        const k = want[cursor++];
+        const rec = imported[k];
+        const res = await ytMeta(rec.i);
+        if (res.meta) {
+          const meta = res.meta;
+          rec.t = meta.t; rec.v = meta.v; rec.a = meta.a;
+          // the live copies in TRACKS and the view are separate objects
+          for (const list of [TRACKS, state.view]) {
+            const t = list.find((x) => x.k === k);
+            if (t) { t.t = meta.t; t.v = meta.v; t.a = meta.a; }
+          }
+          paintRowMeta(k);
+        } else if (res.gone) {
+          /* The same request that fetches a title also answers "does this
+             still exist". A title that will never arrive is not a pending
+             title, it is a dead track — so say so, and let the liveness store,
+             the unavailable count, HIDDEN mode and the replacement finder all
+             pick it up from one round trip. */
+          metaFailed.add(k);
+          /* `|| imported[k]` matters: the eager pass during an import runs
+             before rebuildLibrary() has folded these into TRACKS, so a lookup
+             there finds nothing and the verdict was silently dropped. The
+             stored record carries the key, which is all markLiveness needs. */
+          markLiveness(TRACKS.find((x) => x.k === k) || imported[k],
+                       "gone", res.code || 404, "oembed");
+        }
+        // no `gone` and no meta: the request never landed. Leave it for the
+        // next render pass rather than recording a verdict nobody gave.
+        metaPending.delete(k);
+        done++;
+        if (onProgress) onProgress(done);
+      }
+    }
+    metaRunning++;
+    await Promise.all(Array.from({ length: Math.min(4, want.length) }, worker));
+    metaRunning--;
+    store.write(K_IMPORT, imported);
+    return done;
+  }
+
+  /** Update one already-rendered row in place, without rebuilding the list. */
+  function paintRowMeta(key) {
+    const row = rowFor(key);
+    if (!row) return;
+    const rec = imported[key];
+    const name = row.querySelector(".t-name");
+    const via = row.querySelector(".t-via");
+    if (name) { name.textContent = rec.t; name.classList.remove("is-pending"); }
+    if (via) via.textContent = rec.v ? "via " + rec.v : "";
+  }
+
+  /** Ask for titles for whatever has just been rendered. */
+  function backfillRendered() {
+    if (!Object.keys(imported).length) return;
+    const keys = [];
+    listEl.querySelectorAll(".trow").forEach((r) => {
+      const k = r.dataset.key;
+      if (imported[k] && !imported[k].t) keys.push(k);
+    });
+    if (keys.length) fillMeta(keys);
   }
 
   function setPlStatus(msg, bad) {
@@ -798,31 +899,33 @@
       if (!TRACKS.some((t) => t.k === k) && !imported[k]) fresh.push({ k, i: id });
     }
 
-    let done = 0;
-    let cursor = 0;
-    async function worker() {
-      while (cursor < fresh.length) {
-        const item = fresh[cursor++];
-        if (checkRemaining() <= 0) { item.skip = true; continue; }
-        spendCheck(1);
-        const meta = await ytMeta(item.i);
-        done++;
-        setPlStatus(`fetching ${done}/${fresh.length}\u2026`);
-        item.meta = meta;
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(4, fresh.length) }, worker));
+    /* Every id gets a record immediately, with no title. Titles are filled in
+       by fillMeta() — the first screenful now, the rest as their rows render.
+       This does NOT share the liveness politeness ledger. That ledger exists
+       to stop a background nicety hammering someone else's servers; an import
+       is a foreground action the reader asked for, and letting a background
+       check spend its budget produced exactly the wrong outcome: a 2,000-track
+       sheet arrived with 80 titles and 1,900 bare ids.
 
+       A missing title is stored as "" and never as the id. Writing the id into
+       the title field is indistinguishable, later, from a track genuinely
+       called that — it turns a transient fetch failure into permanent data. */
     for (const item of fresh) {
-      const m = item.meta;
       imported[item.k] = {
         k: item.k, s: "YT", i: item.i,
-        t: m ? m.t : item.i,
-        v: m ? m.v : "",
+        t: "", v: "",
         d: 0,                       // learned from the player on first play
-        a: m ? m.a : "",
+        a: "",
         c: new Date().toISOString().slice(0, 10),
       };
+    }
+    store.write(K_IMPORT, imported);
+
+    // Enough for the first screenful, so the list is never a wall of ids.
+    const eager = fresh.slice(0, CHUNK).map((f) => f.k);
+    if (eager.length) {
+      setPlStatus(`fetching titles 0/${eager.length}\u2026`);
+      await fillMeta(eager, (n) => setPlStatus(`fetching titles ${n}/${eager.length}\u2026`));
     }
 
     const name = `Sheet ${ref.id.slice(0, 6)}`;

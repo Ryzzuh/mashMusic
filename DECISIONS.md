@@ -6,6 +6,65 @@ to undo it.
 
 ---
 
+## 2026-09-08 — Imported titles are fetched lazily, and a 404 is a verdict
+
+**What went wrong first:** the first real sheet held **2,007 ids**. The
+importer fetched metadata under the liveness politeness ledger — 300 requests a
+day, 220 already spent — so about 80 tracks got titles and roughly 1,900 were
+stored with the bare id in the title field. The list was a wall of ids.
+
+Two separate mistakes:
+
+1. **A user-initiated import shared a background budget.** That ledger exists
+   to stop a background nicety hammering someone else's servers. An import is
+   the foreground thing the reader just asked for; letting a background check
+   spend its allowance is exactly backwards. The import no longer touches it.
+2. **A missing title was written as the id.** That turns a transient fetch
+   failure into permanent data — later, nothing can distinguish it from a track
+   genuinely named `hm9UwjS43Rg`. A missing title is now stored as `""`.
+
+**Chosen:** titles are fetched on demand. The import covers the first
+screenful so the list is never a wall of ids; every later row asks for its own
+title as it renders. This is independent of sheet size — 2,007 ids import as
+fast as 20.
+
+A row still waiting shows its **id in the mono face used for ids elsewhere and
+dimmed**, so it reads as "not known yet" rather than as a name.
+
+**A 404 is recorded as a dead track, not as a pending title.** Of the first 60
+ids in the real sheet, **11 were deleted videos**. oEmbed answers 404 for those
+— the same signal `oembedStatus` already uses for liveness — so one round trip
+now fetches the title *and* settles whether the track exists. The unavailable
+count, HIDDEN mode and the replacement finder all pick it up for free. A
+request that never lands is kept distinct and records nothing: no verdict was
+given.
+
+**A bug this hid, found only by checking the store:** the first version looked
+up the track in `TRACKS` before calling `markLiveness`, but the eager pass runs
+before `rebuildLibrary()` has folded imported tracks in, so the lookup found
+nothing and every verdict was silently dropped. `markedGone` was 0 with 11
+genuinely dead tracks on screen. It now falls back to the stored record, which
+carries the key.
+
+**Also:** `selectPlaylist` repaints the idle copy. It names the playlist, so it
+went stale on a switch and claimed "1,257 tracks, posted by friends between
+2012 and 2015" while a 2,007-track sheet was showing.
+
+**Known and not fixed:** an imported track's `c` field is its import date and
+is rendered in the same position as the library's 2015 posting date, so it
+reads as though the track was posted today.
+
+**The EQ cannot work for imported tracks.** Measured against the real sheet: 0
+of 2,007 ids have a precomputed envelope, because envelopes exist only for the
+874 tracks `build-envelopes.py` processed from the 2015 library. Playing one
+shows "no envelope" and an idle spectrum. The only two ways out are running
+that pipeline over the new ids — hours of `yt-dlp`, with the ToS problem
+already recorded — or the live tab-capture EQ, which needs no precomputation
+and would work for any track. This is the strongest argument yet for building
+it.
+
+---
+
 ## 2026-09-08 — Playlists, and the library becomes one of them
 
 **Asked for:** the existing library as the default playlist, a way to add more,

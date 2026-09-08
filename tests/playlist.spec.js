@@ -26,13 +26,19 @@ async function stubSheet(page, body, opts = {}) {
   return seen;
 }
 
-/** Serve oEmbed metadata; returns the ids asked about. */
-async function stubOembed(page) {
+/** Serve oEmbed metadata; returns the ids asked about.
+ *  `opts.gone` is a list of ids YouTube should 404 on;
+ *  `opts.fail` is a list whose requests never land at all. */
+async function stubOembed(page, opts = {}) {
   const seen = [];
+  const gone = new Set(opts.gone || []);
+  const fail = new Set(opts.fail || []);
   await page.route(OEMBED, async (route) => {
     const u = new URL(route.request().url());
     const id = new URL(u.searchParams.get("url")).searchParams.get("v");
     seen.push(id);
+    if (fail.has(id)) return route.abort();
+    if (gone.has(id)) return route.fulfill({ status: 404, body: "" });
     await route.fulfill({
       status: 200, contentType: "application/json",
       body: JSON.stringify({
@@ -43,6 +49,13 @@ async function stubOembed(page) {
   });
   return seen;
 }
+
+/** Rows as the reader sees them: name, whether it is still provisional. */
+const rowsShown = (page) => page.$$eval(".trow", (rs) => rs.map((r) => ({
+  name: r.querySelector(".t-name").textContent,
+  pending: r.querySelector(".t-name").classList.contains("is-pending"),
+  dead: r.classList.contains("is-dead"),
+})));
 
 const lists = (page) => page.evaluate(() =>
   JSON.parse(localStorage.getItem("mash.playlists.v1") || "[]"));
@@ -275,4 +288,66 @@ test("arrow keys inside the dialog do not skip the track underneath", async ({ p
   await page.waitForTimeout(150);
 
   expect(await playing()).toBe(before);
+});
+
+
+test("a title that 404s marks the track dead rather than pending forever", async ({ page }) => {
+  /* One request answers two questions. A title that will never arrive is not
+     a slow title, it is a deleted video — measured against a real sheet, 11 of
+     the first 60 ids were gone. Recording that here means the unavailable
+     count, HIDDEN mode and the replacement finder all work off the same round
+     trip that fetched the titles. */
+  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\n");
+  await stubOembed(page, { gone: ["BBBBBBBBBBB"] });
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(2);
+
+  await expect.poll(async () => (await rowsShown(page))[1].dead).toBe(true);
+  const shown = await rowsShown(page);
+  expect(shown[0]).toMatchObject({ name: "Title AAAAAAAAAAA", pending: false, dead: false });
+  expect(shown[1]).toMatchObject({ name: "BBBBBBBBBBB", pending: true, dead: true });
+
+  await expect(page.locator("#statDead")).toHaveText("1 unavailable");
+  const live = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
+  expect(live["YT:BBBBBBBBBBB"]).toMatchObject({ s: "gone", v: "oembed" });
+  expect(live["YT:AAAAAAAAAAA"]).toBeUndefined();
+});
+
+test("a request that never lands leaves the track pending, not dead", async ({ page }) => {
+  await stubSheet(page, "AAAAAAAAAAA\n");
+  await stubOembed(page, { fail: ["AAAAAAAAAAA"] });
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(1);
+
+  const shown = await rowsShown(page);
+  expect(shown[0]).toMatchObject({ name: "AAAAAAAAAAA", pending: true, dead: false });
+  // no verdict was given, so none is recorded
+  expect(await page.evaluate(() =>
+    localStorage.getItem("mash.liveness.v1"))).toBeNull();
+});
+
+test("titles beyond the first screen arrive as their rows do", async ({ page }) => {
+  /* The sheet this was built against holds 2,007 ids. Fetching every title up
+     front is slow and rude, so the import covers the first chunk and the rest
+     backfill on render. */
+  const ids = Array.from({ length: 80 }, (_, i) =>
+    "Z" + String(i).padStart(4, "0") + "aaaaaa");
+  await stubSheet(page, ids.join("\n"));
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(60);          // one chunk rendered
+
+  await expect.poll(async () =>
+    (await rowsShown(page)).filter((r) => r.pending).length).toBe(0);
+  const firstPass = asked.length;
+  expect(firstPass).toBeLessThan(ids.length);          // not all 80 up front
+
+  // reveal the rest, and their titles follow
+  await page.evaluate(() => document.getElementById("listMore")?.click()
+    || window.scrollTo(0, document.body.scrollHeight));
+  await expect.poll(rowCount(page)).toBe(80);
+  await expect.poll(async () =>
+    (await rowsShown(page)).filter((r) => r.pending).length).toBe(0);
+  expect(asked.length).toBe(ids.length);
 });
