@@ -63,6 +63,58 @@ const importedStore = (page) => page.evaluate(() =>
   JSON.parse(localStorage.getItem("mash.imported.v1") || "{}"));
 const rowCount = (page) => () => page.locator(".trow").count();
 
+/** A stand-in YT IFrame player, installed before the app runs.
+ *
+ * The suite blocks youtube.com, so the real API never loads and the duration
+ * resolver would simply never start. This provides the same surface the
+ * resolver uses — cueVideoById, getDuration, and a state-5 (CUED) event — so
+ * the production loop runs unchanged against known answers.
+ * `durations` maps id -> seconds, or a negative number to raise that error
+ * code instead; an id that is absent never answers at all. */
+async function fakeYT(page, durations, opts = {}) {
+  await page.addInitScript(({ table, delay }) => {
+    let current = null;
+    // Recorded so a test can assert nothing was ever PLAYED, only cued.
+    window.__yt = { cued: [], loaded: [] };
+    window.YT = {
+      PlayerState: { ENDED: 0, PLAYING: 1, PAUSED: 2, CUED: 5 },
+      Player: function (host, opts) {
+        const ev = (opts && opts.events) || {};
+        this.mute = () => {};
+        this.getDuration = () => (current !== null && table[current] > 0 ? table[current] : 0);
+        this.cueVideoById = (id) => {
+          current = id;
+          window.__yt.cued.push(id);
+          setTimeout(() => {
+            const v = table[id];
+            if (v === undefined) return;                 // never answers: timeout
+            if (v < 0) ev.onError && ev.onError({ data: -v });
+            else ev.onStateChange && ev.onStateChange({ data: 5 });
+          }, delay);
+        };
+        /* Deliberately NOT an alias for cueVideoById. Playing a video reaches
+           state 1, never state 5, which is what makes "the resolver plays
+           instead of cueing" detectable at all — aliasing them made the two
+           indistinguishable and a mutation check went MISSED. */
+        this.loadVideoById = (id) => {
+          current = id;
+          window.__yt.loaded.push(id);
+          setTimeout(() => {
+            const v = table[id];
+            if (v === undefined) return;
+            if (v < 0) ev.onError && ev.onError({ data: -v });
+            else ev.onStateChange && ev.onStateChange({ data: 1 });   // PLAYING
+          }, 5);
+        };
+        this.pauseVideo = this.stopVideo = this.playVideo = () => {};
+        this.getCurrentTime = () => 0;
+        setTimeout(() => ev.onReady && ev.onReady({ target: this }), 0);
+      },
+    };
+    if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady();
+  }, { table: durations, delay: opts.delay ?? 5 });
+}
+
 async function importSheet(page, value = SHEET_ID) {
   await page.click("#plMore");
   await page.click('[data-playlist="new"]');
@@ -305,7 +357,7 @@ test("a title that 404s marks the track dead rather than pending forever", async
   await expect.poll(async () => (await rowsShown(page))[1].dead).toBe(true);
   const shown = await rowsShown(page);
   expect(shown[0]).toMatchObject({ name: "Title AAAAAAAAAAA", pending: false, dead: false });
-  expect(shown[1]).toMatchObject({ name: "BBBBBBBBBBB", pending: true, dead: true });
+  expect(shown[1]).toMatchObject({ name: "Resolving — BBBBBBBBBBB", pending: true, dead: true });
 
   await expect(page.locator("#statDead")).toHaveText("1 unavailable");
   const live = await page.evaluate(() =>
@@ -321,7 +373,7 @@ test("a request that never lands leaves the track pending, not dead", async ({ p
   await expect.poll(rowCount(page)).toBe(1);
 
   const shown = await rowsShown(page);
-  expect(shown[0]).toMatchObject({ name: "AAAAAAAAAAA", pending: true, dead: false });
+  expect(shown[0]).toMatchObject({ name: "Resolving — AAAAAAAAAAA", pending: true, dead: false });
   // no verdict was given, so none is recorded
   expect(await page.evaluate(() =>
     localStorage.getItem("mash.liveness.v1"))).toBeNull();
@@ -350,4 +402,98 @@ test("titles beyond the first screen arrive as their rows do", async ({ page }) 
   await expect.poll(async () =>
     (await rowsShown(page)).filter((r) => r.pending).length).toBe(0);
   expect(asked.length).toBe(ids.length);
+});
+
+
+test("durations resolve in the background without playing anything", async ({ page }) => {
+  /* oEmbed never returns a duration and videos.list needs a key, but the
+     official IFrame API reports one from a CUED video — nothing streams and it
+     is not a view. */
+  await fakeYT(page, { AAAAAAAAAAA: 211, BBBBBBBBBBB: 355 });
+  await page.reload();
+  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\n");
+  await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(2);
+
+  await expect.poll(async () => (await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(211);
+  await expect.poll(async () => (await importedStore(page))["YT:BBBBBBBBBBB"].d).toBe(355);
+
+  // and the rows show them, without a reload
+  await expect.poll(() => page.locator('.trow[data-key="YT:AAAAAAAAAAA"] .t-dur').textContent())
+    .toBe("3:31");
+  /* Nothing was played. Cueing is not a view and nothing streams — that is
+     the entire justification for resolving 2,000 durations this way. */
+  const calls = await page.evaluate(() => window.__yt);
+  expect(calls.loaded).toEqual([]);
+  expect(calls.cued.sort()).toEqual(["AAAAAAAAAAA", "BBBBBBBBBBB"]);
+  await expect(page.locator("#npTitle")).toHaveText("Nothing playing");
+});
+
+test("a track the player refuses is recorded, not retried forever", async ({ page }) => {
+  await fakeYT(page, { AAAAAAAAAAA: 211, BBBBBBBBBBB: -150 });   // 150 = embed blocked
+  await page.reload();
+  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\n");
+  await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(2);
+
+  await expect.poll(async () => (await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(211);
+  const live = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
+  expect(live["YT:BBBBBBBBBBB"]).toMatchObject({ s: "blocked", c: 150 });
+  expect((await importedStore(page))["YT:BBBBBBBBBBB"].d).toBe(0);
+});
+
+test("resolving picks up where the last session stopped", async ({ page }) => {
+  await fakeYT(page, { AAAAAAAAAAA: 211, BBBBBBBBBBB: 355 });
+  await page.evaluate(() => {
+    localStorage.setItem("mash.imported.v1", JSON.stringify({
+      "YT:AAAAAAAAAAA": { k: "YT:AAAAAAAAAAA", s: "YT", i: "AAAAAAAAAAA", t: "One", v: "", d: 211, a: "", c: "" },
+      "YT:BBBBBBBBBBB": { k: "YT:BBBBBBBBBBB", s: "YT", i: "BBBBBBBBBBB", t: "Two", v: "", d: 0, a: "", c: "" },
+    }));
+    localStorage.setItem("mash.playlists.v1", JSON.stringify([
+      { id: "p1", name: "Saved", type: "sheets", source: "x",
+        keys: ["YT:AAAAAAAAAAA", "YT:BBBBBBBBBBB"], added: 1 },
+    ]));
+    localStorage.setItem("mash.playlist.v1", JSON.stringify("p1"));
+  });
+  await page.reload();
+  await expect.poll(rowCount(page)).toBe(2);
+  await expect.poll(async () => (await importedStore(page))["YT:BBBBBBBBBBB"].d).toBe(355);
+});
+
+test("a title still arriving says so instead of showing a bare id", async ({ page }) => {
+  await stubSheet(page, "AAAAAAAAAAA\n");
+  await stubOembed(page, { fail: ["AAAAAAAAAAA"] });
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(1);
+  await expect(page.locator(".t-name").first()).toHaveText("Resolving — AAAAAAAAAAA");
+});
+
+
+test("durations are saved as they resolve, not only when the run ends", async ({ page }) => {
+  /* A 2,000-track run takes about 17 minutes. Writing only at the end means a
+     reload or a closed tab throws all of it away — which is exactly what
+     happened against the real sheet: 157 durations resolved in memory and none
+     survived. */
+  const ids = Array.from({ length: 30 }, (_, i) => "D" + String(i).padStart(4, "0") + "aaaaaa");
+  const table = {};
+  ids.forEach((id, i) => { table[id] = 100 + i; });
+  await fakeYT(page, table, { delay: 60 });     // slow enough to observe mid-run
+  await page.reload();
+
+  await stubSheet(page, ids.join("\n"));
+  await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(30);
+
+  // some are on disk well before all 30 are done
+  await expect.poll(async () => {
+    const imp = await importedStore(page);
+    return Object.values(imp).filter((v) => v.d > 0).length;
+  }, { timeout: 15_000 }).toBeGreaterThanOrEqual(10);
+
+  const partial = Object.values(await importedStore(page)).filter((v) => v.d > 0).length;
+  expect(partial).toBeLessThan(30);             // and the run is still going
 });

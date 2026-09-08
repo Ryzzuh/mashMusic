@@ -548,5 +548,48 @@ mut 'the capture stops silencing nothing and mutes the tab' app.js \
   '        audio: { suppressLocalAudioPlayback: true },' \
   tests/liveeq.spec.js 'asks for this tab'
 
+# ------------------------------------------------------ background durations
+
+mut 'the duration resolver plays tracks instead of cueing them' app.js \
+  '      try { durPlayer.cueVideoById(id); } catch (e) { finish({ error: true }); }' \
+  '      try { durPlayer.loadVideoById(id); } catch (e) { finish({ error: true }); }' \
+  tests/playlist.spec.js 'without playing anything'
+
+mut 'the resolver polls getDuration instead of waiting for the cue' app.js \
+  '        onStateChange: (e) => { if (e.data === 5 && durCued) durCued({ ok: true }); },' \
+  '        onStateChange: (e) => { void e; },' \
+  tests/playlist.spec.js 'without playing anything'
+
+mut 'a resolved duration never reaches the row' app.js \
+  '    const row = rowFor(key);
+    if (row) {
+      const cell = row.querySelector(".t-dur");
+      if (cell) cell.textContent = fmtDur(secs);
+    }' \
+  '    void key;' \
+  tests/playlist.spec.js 'without playing anything'
+
+mut 'a refused track is retried forever instead of recorded' app.js \
+  '          durFailed.add(track.k);
+          const status = res.code === 100 ? "gone"' \
+  '          const status = res.code === 100 ? "gone"' \
+  tests/playlist.spec.js 'refuses is recorded'
+
+mut 'resolving does not resume from a previous session' app.js \
+  '  resolveDurations();
+  document.addEventListener("visibilitychange", () => {' \
+  '  document.addEventListener("visibilitychange", () => {' \
+  tests/playlist.spec.js 'picks up where the last session stopped'
+
+mut 'a title still arriving is shown as a bare id' app.js \
+  '      name.textContent = "Resolving \u2014 " + track.i;' \
+  '      name.textContent = track.i;' \
+  tests/playlist.spec.js 'says so instead of showing a bare id'
+
+mut 'resolved durations are held in memory until the run ends' app.js \
+  '        if (++sinceWrite >= 10) { sinceWrite = 0; store.write(K_IMPORT, imported); }' \
+  '        sinceWrite++;' \
+  tests/playlist.spec.js 'saved as they resolve'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

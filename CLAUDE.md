@@ -84,6 +84,14 @@ The import must not use the `mash.livecheck.v1` ledger: that is a budget for
 background politeness, and spending it on a foreground import produced a list
 of 1,900 bare ids.
 
+**Durations come from cueing, not playing.** oEmbed has none and `videos.list`
+needs a key, but the IFrame API reports a duration from a CUED video — nothing
+streams, so it is not a view. ~0.5s per track; a 2,000-track sheet resolves in
+about 17 minutes in the background. **Wait for the cue event; never poll
+`getDuration()`** — it returns whatever the player loaded last, which made an
+early measurement report 8s per track and wrong durations. Persist as you go:
+writing only at the end lost 157 resolved durations to one reload.
+
 An oEmbed **404 is a liveness verdict**, not a slow title — one request both
 names the track and settles whether it exists. A request that never lands
 records nothing.

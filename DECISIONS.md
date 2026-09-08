@@ -6,6 +6,64 @@ to undo it.
 
 ---
 
+## 2026-09-08 — Durations resolve in the background, by cueing not playing
+
+**Asked for:** batch-resolve durations silently while a playlist loads, with
+`Resolving — <id>` shown until title and duration arrive.
+
+**The options, measured rather than assumed:**
+
+- **oEmbed** carries no duration. Confirmed.
+- **`videos.list`** does, and is CORS-open — 2,007 ids in 41 requests at one
+  quota unit each, plus `embeddable` for free. Strictly the best answer, but it
+  needs an API key that cannot ship in a static page.
+- **The IFrame Player API** reports a duration from a **cued** video.
+  `cueVideoById()` puts the player in state 5 (CUED) and `getDuration()` then
+  answers. Nothing streams, so it is not a view, and it is the official
+  embed API used for its documented purpose.
+
+**Chosen:** a hidden, muted, off-screen player that cues each unresolved track
+in turn. Keyless, no setup, resumable across sessions.
+
+**A measurement that was wrong, and how:** the first probe reported ~8 seconds
+per track, which would have made a 2,000-track playlist take 4.5 hours and
+killed the idea. It was polling `getDuration()`, which kept returning the
+**previous** video's value — visible because two consecutive lookups returned
+identical durations for different videos. Waiting for the cue event instead
+gives ~**0.5 s** per track and correct answers: ~17 minutes for 2,007, or
+about five in parallel. Never poll a player for a value that belongs to
+whatever it loaded last.
+
+**Two bugs found only by running it against the real 2,007-track sheet, both
+invisible to the tests:**
+
+1. **The loop was gated on `document.hidden`.** Precisely backwards — a
+   17-minute background job should keep going when the tab is not in front,
+   which is when it is least in the way. Measured: an off-screen player in a
+   hidden tab still answers in ~0.5 s.
+2. **Durations were persisted only in the `finally` block.** 157 resolved in
+   memory and every one was lost on reload, while the liveness verdicts from
+   the same loop survived because `markLiveness` writes immediately. Now
+   written every ten resolutions — batched because the store is a single JSON
+   blob and rewriting it 2,000 times is pointless.
+
+**A refusal is a verdict, as with the oEmbed 404s.** Cue errors 100/101/150 are
+the same codes the real player reports, so they are recorded as `gone` or
+`blocked` instead of being discarded. Against the real sheet that surfaced
+**25 embed-blocked tracks** the title fetch could not have found — oEmbed
+answers 200 for those.
+
+**Cross-checked against a known value:** "Peverelist Old School Jungle Mixtape"
+resolved to 4024 s, and the player had independently reported 1:07:04 for the
+same track when played.
+
+**A mutation check went MISSED because the fake was too kind:** it aliased
+`loadVideoById` to `cueVideoById`, so "the resolver plays instead of cueing"
+was undetectable. The fake now sends state 1 for a load and state 5 for a cue,
+and records both, so the test can assert nothing was ever played.
+
+---
+
 ## 2026-09-08 — The capture has to ask for the tab it is running in
 
 **Reported:** "I don't see this tab listed in the Microsoft Edge tab selector."

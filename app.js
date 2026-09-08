@@ -186,6 +186,7 @@
     // something repaints it. Only when nothing is playing: otherwise this is
     // the now-playing line and belongs to the track.
     if (!state.current) $("npSub").textContent = idleCopy();
+    resolveDurations();
   }
 
 
@@ -562,8 +563,9 @@
     if (track.t) {
       name.textContent = track.t;
     } else {
-      // Title not known yet. Show what IS known, marked as provisional.
-      name.textContent = track.i;
+      // Title not known yet. Say so, and show what IS known — never the bare
+      // id on its own, which reads as though the track is called that.
+      name.textContent = "Resolving \u2014 " + track.i;
       name.classList.add("is-pending");
     }
     via.textContent = track.v ? "via " + track.v : "";
@@ -843,6 +845,138 @@
     if (keys.length) fillMeta(keys);
   }
 
+  /* ------------------------------------------------- background durations
+   *
+   * oEmbed carries no duration, and videos.list — the endpoint that does —
+   * needs an API key that cannot ship in a static page. But the official
+   * IFrame Player API will report one WITHOUT playing anything:
+   * cueVideoById() puts the player in state 5 (CUED) and getDuration() then
+   * answers. Cueing is not a view; nothing streams.
+   *
+   * Measured 2026-09-08 against real ids: ~0.5s per track on a hidden player,
+   * so a 2,000-track sheet resolves in roughly 17 minutes in the background
+   * while the reader gets on with things. (An earlier measurement said 8s and
+   * was wrong: the probe polled getDuration() and kept reading the PREVIOUS
+   * video's value. The cue event is the only safe signal, which is why this
+   * waits for onStateChange rather than polling.)
+   *
+   * If a key ever exists, videos.list does the same job for 2,007 tracks in 41
+   * requests and one quota unit each, and throws in `embeddable` as well. This
+   * is the keyless path, not the best one. */
+  const DUR_TIMEOUT = 12000;
+  const DUR_GAP = 150;                // pause between cues; see the loop below
+  let durPlayer = null;
+  let durReady = false;
+  let durCued = null;                 // resolver for the cue currently in flight
+  let durRunning = false;
+  const durFailed = new Set();        // ids the player refused; do not retry
+
+  const durNeeded = () => Object.values(imported)
+    .filter((t) => !t.d && !durFailed.has(t.k));
+
+  function ensureDurPlayer() {
+    if (durPlayer || !window.YT || !window.YT.Player) return durPlayer;
+    const host = document.createElement("div");
+    host.id = "ytDuration";
+    /* Off-screen rather than display:none — a hidden player is not guaranteed
+       to load metadata, and this must never be visible or audible. */
+    host.style.cssText = "position:fixed;left:-9999px;top:0;width:200px;height:120px";
+    document.body.appendChild(host);
+    durPlayer = new YT.Player(host, {
+      host: "https://www.youtube-nocookie.com",
+      height: 120, width: 200,
+      playerVars: { rel: 0, playsinline: 1 },
+      events: {
+        onReady: () => { durReady = true; try { durPlayer.mute(); } catch (e) {} },
+        onStateChange: (e) => { if (e.data === 5 && durCued) durCued({ ok: true }); },
+        onError: (e) => { if (durCued) durCued({ ok: false, code: e.data }); },
+      },
+    });
+    return durPlayer;
+  }
+
+  /** Cue one id and report its duration. Never plays it. */
+  function cueForDuration(id) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (r) => { if (!done) { done = true; durCued = null; resolve(r); } };
+      durCued = (r) => finish(r.ok ? { d: durPlayer.getDuration() } : { code: r.code });
+      setTimeout(() => finish({ timeout: true }), DUR_TIMEOUT);
+      try { durPlayer.cueVideoById(id); } catch (e) { finish({ error: true }); }
+    });
+  }
+
+  async function resolveDurations() {
+    if (durRunning) return 0;
+    if (!durNeeded().length) return 0;
+    if (!ensureDurPlayer()) return 0;
+
+    durRunning = true;
+    let filled = 0;
+    try {
+      // Wait for the player, but do not wait forever if the API never lands.
+      for (let i = 0; i < 60 && !durReady; i++) await new Promise((r) => setTimeout(r, 250));
+      if (!durReady) return 0;
+
+      let track;
+      let sinceWrite = 0;
+      while ((track = durNeeded()[0])) {
+        /* Deliberately keeps going when the tab is hidden. This was gated on
+           document.hidden at first, which is precisely backwards: resolving
+           2,000 durations takes ~17 minutes, and a background tab is exactly
+           when it should be getting on with it. Measured: an off-screen player
+           in a hidden tab still reports durations in ~0.5s. */
+        const res = await cueForDuration(track.i);
+        if (res.d > 0) {
+          setDuration(track.k, Math.round(res.d));
+          filled++;
+        } else if (res.code) {
+          /* The player refused it. Codes 100/101/150 are the same verdicts the
+             real player reports, so record them rather than just giving up. */
+          durFailed.add(track.k);
+          const status = res.code === 100 ? "gone"
+            : (res.code === 101 || res.code === 150) ? "blocked" : null;
+          if (status) markLiveness(TRACKS.find((x) => x.k === track.k) || imported[track.k],
+                                   status, res.code, "oembed");
+        } else {
+          durFailed.add(track.k);            // timed out; try again next session
+        }
+        /* Persist as we go. This used to write only in the finally below, so a
+           2,000-track run held ~17 minutes of results in memory and lost every
+           one of them if the page was closed or reloaded first. Batched rather
+           than per-track: the store is one JSON blob and rewriting it 2,000
+           times is pointless work. */
+        if (++sinceWrite >= 10) { sinceWrite = 0; store.write(K_IMPORT, imported); }
+        /* Breathing room between cues. Each one is a full player load, and
+           2,000 of them back to back measurably loaded a two-core machine —
+           observed while this ran alongside the test suite. A judgement call,
+           not a tuned figure: it costs ~5 minutes over a 2,000-track sheet
+           that already takes ~17, and the work is meant to be invisible. */
+        await new Promise((r) => setTimeout(r, DUR_GAP));
+      }
+    } finally {
+      durRunning = false;
+      store.write(K_IMPORT, imported);
+      paintStatus();
+    }
+    return filled;
+  }
+
+  /** Write a duration everywhere the same track is held, and repaint its row. */
+  function setDuration(key, secs) {
+    const rec = imported[key];
+    if (rec) rec.d = secs;
+    for (const list of [TRACKS, state.view]) {
+      const t = list.find((x) => x.k === key);
+      if (t) t.d = secs;
+    }
+    const row = rowFor(key);
+    if (row) {
+      const cell = row.querySelector(".t-dur");
+      if (cell) cell.textContent = fmtDur(secs);
+    }
+  }
+
   function setPlStatus(msg, bad) {
     const el = $("plStatus");
     if (!el) return;
@@ -956,7 +1090,12 @@
       host: "https://www.youtube-nocookie.com",
       playerVars: { rel: 0, playsinline: 1, modestbranding: 1 },
       events: {
-        onReady: () => { ytReady = true; },
+        onReady: () => {
+          ytReady = true;
+          // The API lands well after boot, so the first resolveDurations()
+          // found no YT.Player and gave up. This is the retry.
+          resolveDurations();
+        },
         onStateChange: (e) => {
           if (e.data === YT.PlayerState.ENDED) completed();
           if (e.data === YT.PlayerState.PLAYING) {
@@ -1815,11 +1954,7 @@
   function learnDuration(track, secs) {
     if (!track || track.d || !imported[track.k]) return;
     if (!(secs > 0) || contentMismatch) return;      // never learn from an ad
-    const d = Math.round(secs);
-    imported[track.k].d = d;
-    track.d = d;
-    const inView = state.view.find((t) => t.k === track.k);
-    if (inView) inView.d = d;
+    setDuration(track.k, Math.round(secs));
     store.write(K_IMPORT, imported);
     paintTransportFlanks();
   }
@@ -2764,6 +2899,11 @@
 
   booted = true;
   paintPlaylist();
+  // Picks up where a previous session left off; no-ops when nothing is missing.
+  resolveDurations();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) resolveDurations();      // the loop stops when hidden
+  });
 
   document.documentElement.dataset.skin = prefs.skin;
   document.querySelectorAll("button[data-skin]").forEach((b) =>
