@@ -18,7 +18,7 @@ open. That is the state as of this writing.
 
 - All nine milestones of the feature spec (Jukebox 1, 2, 3, 11; QoL 1, 2, 4, 5,
   6, 7, 8, 10; touchups 1, 2).
-- 156 Playwright tests, 68 mutation checks in `tools/mutate.sh`, all passing.
+- 171 Playwright tests, 80 mutation checks in `tools/mutate.sh`, all passing.
 - Fonts self-hosted in `assets/fonts/`.
 - SoundCloud spectral envelopes merged into `Ryzzuh/mashMusic-eq` `main` and
   serving: 241/312 SoundCloud tracks (77%), 633/945 YouTube (66%).

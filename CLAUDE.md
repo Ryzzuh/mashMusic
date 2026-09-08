@@ -40,6 +40,22 @@ Adding a predicate there reaches the tracklist, the counts, autoplay and the
 wheel at once. Filtering anywhere else will desynchronise them. This is the most
 important convention in the codebase.
 
+## The spectrum
+
+Two sources, and they must agree. `tools/build-envelopes.py` precomputes 24 log
+bands offline; "go live" analyses the tab's own audio through
+`getDisplayMedia` + `AnalyserNode`. Web Audio still cannot reach inside the
+cross-origin iframe — a MediaStream is the way in, and it needs the reader's
+consent, so live mode is opt-in and never starts on its own.
+
+**Reduce each band by its PEAK bin, not its mean.** `build-envelopes.py` does
+`mag[:, b0:b1].max(axis=1)`; the live path must match or the two look like
+different instruments. Averaging also scales a band with its own width — the
+top band is ~143 bins against the bottom band's ~2.
+
+Live is the only option for an imported playlist: envelopes exist for 874
+tracks, and 0 of the first 2,007 imported ids had one.
+
 ## Playlists
 
 `TRACKS` is **not** a constant: it is the built-in library (`BUILTIN`, what

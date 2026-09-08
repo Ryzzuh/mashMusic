@@ -6,6 +6,77 @@ to undo it.
 
 ---
 
+## 2026-09-08 — A live spectrum, from the tab's own audio
+
+**Why now:** the 2,007-track sheet import made the precomputed approach's limit
+concrete. Envelopes exist only for the 874 tracks `build-envelopes.py`
+processed; **0 of the 2,007 imported ids had one**, and none ever would without
+hours of `yt-dlp`. A library you can add to cannot be served by a pipeline that
+has to be run beforehand.
+
+**The constraint that made this look impossible was real but narrower than
+recorded.** Web Audio cannot reach inside a cross-origin iframe — verified
+again: `contentDocument` throws, and there is no same-origin media element to
+attach `createMediaElementSource` to. But Web Audio can analyse a
+**MediaStream**, and `getDisplayMedia` will hand over a tab's audio with the
+reader's consent. So the barrier was never Web Audio; it was that nothing had
+asked the reader.
+
+**Chosen:** an opt-in "go live" control on the spectrum. When on, the bars show
+the tab's actual audio and the precomputed path is bypassed entirely.
+
+- Never started on its own. A page that asks to capture your screen unprompted
+  is not one to trust, and there is a test asserting the app has not called
+  `getDisplayMedia` without a click.
+- The video track is stopped the moment the stream arrives; only audio is kept.
+- The analyser is deliberately **not** connected to `ctx.destination` — the tab
+  is already playing this audio and routing it back would double it.
+- Chrome's own "Stop sharing" ends the track without telling the page, so the
+  track's `ended` event returns the app to envelope mode.
+
+**A real mismatch this surfaced, found by a test that would not pass.** The
+live path averaged power across each band; `tools/build-envelopes.py` takes the
+band's **peak bin** (`mag[:, b0:b1].max(axis=1)`). Two consequences: the two
+sources would have looked like different instruments, and averaging scales a
+band's level with its own width — the top band spans ~143 bins against the
+bottom band's ~2, so a pure tone up there was diluted by ~18 dB and almost
+exactly cancelled the 16 dB tilt. Measured across five amplitudes before
+changing anything. The live path now takes the peak, matching the pipeline.
+
+**Two mutation checks went MISSED first, and both were the test's fault:**
+
+- The bar-height helper scanned the whole canvas column, so it measured the 1px
+  grid line the app draws every frame regardless. "A bar was drawn" was
+  therefore true with the live source disconnected. It now scans only above the
+  baseline.
+- Tilt cannot be detected with one tone: it changes how tall a band is, not
+  which band a tone lands in. The test now uses two tones of identical
+  amplitude six octaves apart, so any height difference is the tilt alone.
+
+**`settleBars` polls rather than sleeping.** A fixed 700 ms wait measured a
+rising edge under load and failed three of these tests on a busy machine while
+passing on an idle one — the suite's own rule, broken in new code.
+
+**A load-order trap:** the control was wired next to the other buttons, ~400
+lines above where `live` and `liveActive()` are declared, which put
+`paintLiveBtn()` in their temporal dead zone. It threw on every load and left
+the button inert while everything else worked. The wiring now sits with the
+definitions.
+
+**Known limits.** macOS Chrome delivers audio only for a **tab** share; a
+window or whole-screen share yields a stream with no audio track, which is
+reported rather than silently doing nothing. The capture ends when the reader
+stops sharing, and there is no way to restart it without another prompt — a
+browser guarantee, not something to work around.
+
+**Not done:** the live path normalises against fixed dBFS bounds
+(`LIVE_FLOOR`/`LIVE_CEIL`) while the offline path normalises per track against
+that track's own peak. Live has no whole track to look at, so the two cannot be
+identical; a rolling peak would close the gap if the fixed window proves wrong
+in use.
+
+---
+
 ## 2026-09-08 — Imported titles are fetched lazily, and a 404 is a verdict
 
 **What went wrong first:** the first real sheet held **2,007 ids**. The

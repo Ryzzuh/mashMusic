@@ -1558,6 +1558,145 @@
   }
   new ResizeObserver(eqResize).observe(eqCanvas);
 
+  /* ----------------------------------------------------------- live spectrum
+   *
+   * Web Audio cannot reach inside a cross-origin iframe, which is why the
+   * envelopes are precomputed at all. But it CAN analyse a MediaStream, and
+   * getDisplayMedia will hand over a tab's audio with the reader's consent.
+   * So a live spectrum is possible after all — it just costs a permission
+   * prompt, and it is the only option for a track nobody has analysed offline
+   * (an imported playlist has no envelopes at all).
+   *
+   * This is opt-in and per-session by design. It is never started on its own:
+   * a page that asks to capture your screen unprompted is not one to trust.
+   *
+   * macOS note: Chrome only delivers audio for a TAB share. Choosing a window
+   * or the whole screen yields a stream with no audio track, which is why the
+   * missing-track case below is a first-class error rather than a throw. */
+  const LIVE_FLOOR = -85;           // dBFS mapped to an empty bar
+  const LIVE_CEIL = -18;            // dBFS mapped to a full one
+
+  let live = null;                  // { stream, ctx, analyser, bins, edges }
+
+  const liveActive = () => !!(live && live.analyser);
+
+  /** Bin ranges for each of the n log-spaced bands, given the sample rate. */
+  function liveEdges(n, sampleRate, binCount) {
+    const nyquist = sampleRate / 2;
+    const edges = [];
+    for (let i = 0; i < n; i++) {
+      const lo = 40 * Math.pow(16000 / 40, i / n);
+      const hi = 40 * Math.pow(16000 / 40, (i + 1) / n);
+      let a = Math.floor((lo / nyquist) * binCount);
+      let b = Math.ceil((hi / nyquist) * binCount);
+      a = Math.max(0, Math.min(binCount - 1, a));
+      b = Math.max(a + 1, Math.min(binCount, b));
+      edges.push([a, b]);
+    }
+    return edges;
+  }
+
+  /** Fill `out` with the current spectrum, shaped like sampleEnvelope's. */
+  function sampleLive(out) {
+    const n = out.length;
+    live.analyser.getFloatFrequencyData(live.bins);
+    for (let i = 0; i < n; i++) {
+      const [a, b] = live.edges[i];
+      /* The PEAK bin in the band, not the average — tools/build-envelopes.py
+         does `mag[:, b0:b1].max(axis=1)` and the two paths have to agree or
+         they look like different instruments. Averaging also scales a band's
+         level with its own width: the top band spans ~143 bins against the
+         bottom band's ~2, so a pure tone up there was diluted by ~18 dB and
+         almost exactly cancelled the tilt. Measured, not guessed. */
+      let db = -Infinity;
+      for (let j = a; j < b; j++) if (live.bins[j] > db) db = live.bins[j];
+      if (!isFinite(db)) db = -140;
+      // Same tilt as the offline path so the two look like one instrument.
+      const tilted = db + EQ_TILT * Math.log2(Math.max(eqCentres[i], 40) / 200);
+      const v = (tilted - LIVE_FLOOR) / (LIVE_CEIL - LIVE_FLOOR);
+      out[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+    }
+  }
+
+  async function startLive() {
+    if (liveActive()) return { ok: true };
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,                        // Chrome refuses an audio-only ask
+        audio: { suppressLocalAudioPlayback: false },   // keep hearing it
+      });
+    } catch (e) {
+      // The reader dismissed the picker. Not an error worth shouting about.
+      return { ok: false, error: e && e.name === "NotAllowedError"
+        ? "Sharing was cancelled." : "Could not capture audio." };
+    }
+
+    const audio = stream.getAudioTracks()[0];
+    if (!audio) {
+      stream.getTracks().forEach((t) => t.stop());
+      return { ok: false, error: "That share carried no audio. Pick a tab and tick \u201cshare tab audio\u201d." };
+    }
+    // The frames are of no use to a spectrum; drop them so the capture is
+    // audio only and the browser stops encoding video.
+    stream.getVideoTracks().forEach((t) => t.stop());
+
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0;      // eqFrame does its own smoothing
+    /* Deliberately NOT connected to ctx.destination: the tab is already
+       playing this audio, and routing it back would double it. */
+    ctx.createMediaStreamSource(stream).connect(analyser);
+
+    live = {
+      stream, ctx, analyser,
+      bins: new Float32Array(analyser.frequencyBinCount),
+      edges: liveEdges(24, ctx.sampleRate, analyser.frequencyBinCount),
+    };
+    // Chrome's own "Stop sharing" ends the track without telling the page.
+    audio.addEventListener("ended", () => stopLive());
+    audio.addEventListener("mute", () => paintLiveBtn());
+
+    paintLiveBtn();
+    setEqTag("live \u00b7 tab audio", true);
+    return { ok: true };
+  }
+
+  function stopLive() {
+    if (!live) return;
+    try { live.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* already gone */ }
+    try { live.ctx.close(); } catch (e) { /* already closed */ }
+    live = null;
+    paintLiveBtn();
+    // Hand the tag back to whatever the envelope path has to say.
+    setEqTag(eqData ? eqData.bands + " bands \u00b7 " + eqData.fps + " fps" : "no envelope", !!eqData);
+  }
+
+  function paintLiveBtn() {
+    const b = $("eqLive");
+    if (!b) return;
+    b.setAttribute("aria-pressed", String(liveActive()));
+    b.textContent = liveActive() ? "live" : "go live";
+    b.title = liveActive()
+      ? "Stop analysing this tab's audio"
+      : "Analyse this tab's audio for a real spectrum. Pick this tab and tick \u201cshare tab audio\u201d.";
+  }
+
+  /* Wired here rather than with the other controls: `live` and liveActive()
+     are declared just above, and registering earlier put paintLiveBtn() in
+     their temporal dead zone — which threw on load and left the button inert
+     while everything else still worked. */
+  $("eqLive").addEventListener("click", async () => {
+    if (liveActive()) { stopLive(); return; }
+    const btn = $("eqLive");
+    btn.disabled = true;
+    const res = await startLive();
+    btn.disabled = false;
+    if (!res.ok) setEqTag(res.error, false);
+  });
+  paintLiveBtn();
+
   function setEqTag(text, live) {
     const el = $("eqTag");
     el.textContent = text;
@@ -1867,13 +2006,19 @@
 
     eqCtx.clearRect(0, 0, eqW, eqH);
 
-    const active = eqData && state.current && state.playing && !contentMismatch;
-    const n = eqData ? eqData.bands : 24;
+    /* Live wins when it is on: it is measuring what is actually coming out,
+       which beats a precomputed guess and is the only thing that works for a
+       track with no envelope. It also ignores contentMismatch — during an ad
+       the live spectrum is simply showing the ad, which is correct. */
+    const useLive = liveActive();
+    const active = useLive || (eqData && state.current && state.playing && !contentMismatch);
+    const n = useLive ? 24 : (eqData ? eqData.bands : 24);
     allocBands(n);
 
     if (active) {
       const target = new Float32Array(n);
-      sampleEnvelope(mediaTime(), target);
+      if (useLive) sampleLive(target);
+      else sampleEnvelope(mediaTime(), target);
       for (let i = 0; i < n; i++) {
         const v = target[i];
         const k = v > eqLevels[i] ? EQ_ATTACK : EQ_RELEASE;

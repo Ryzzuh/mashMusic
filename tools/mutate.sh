@@ -487,5 +487,56 @@ mut 'rendered rows never ask for their missing titles' app.js \
   '    void 0;' \
   tests/playlist.spec.js 'beyond the first screen arrive'
 
+# ------------------------------------------------------------ live spectrum
+# The band mapping is the part with real arithmetic in it, so break it in a way
+# that still draws something — a check that only proves "bars appeared" would
+# pass against a wrong mapping.
+
+mut 'the live source is ignored in favour of the envelope' app.js \
+  '    const useLive = liveActive();' \
+  '    const useLive = false;' \
+  tests/liveeq.spec.js 'no envelope'
+
+mut 'band edges are linear in frequency, not logarithmic' app.js \
+  '      const lo = 40 * Math.pow(16000 / 40, i / n);
+      const hi = 40 * Math.pow(16000 / 40, (i + 1) / n);' \
+  '      const lo = 40 + (16000 - 40) * (i / n);
+      const hi = 40 + (16000 - 40) * ((i + 1) / n);' \
+  tests/liveeq.spec.js 'lights the band it belongs in'
+
+mut 'the spectrum tilt is dropped from the live path' app.js \
+  '      const tilted = db + EQ_TILT * Math.log2(Math.max(eqCentres[i], 40) / 200);' \
+  '      const tilted = db;' \
+  tests/liveeq.spec.js 'spectrum is tilted'
+
+# The live path must reduce each band the same way tools/build-envelopes.py
+# does (peak bin, not mean) or the two sources look like different instruments.
+mut 'the live path averages a band instead of taking its peak' app.js \
+  '      let db = -Infinity;
+      for (let j = a; j < b; j++) if (live.bins[j] > db) db = live.bins[j];' \
+  '      let db = 0;
+      for (let j = a; j < b; j++) db += live.bins[j] / (b - a);' \
+  tests/liveeq.spec.js 'spectrum is tilted'
+
+mut 'a share carrying no audio is accepted anyway' app.js \
+  '    if (!audio) {' \
+  '    if (false) {' \
+  tests/liveeq.spec.js 'no audio is reported'
+
+mut 'the screen capture keeps running after live mode stops' app.js \
+  '    try { live.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* already gone */ }' \
+  '    try { void live; } catch (e) { /* already gone */ }' \
+  tests/liveeq.spec.js 'releases the capture'
+
+mut 'the video track is captured and kept' app.js \
+  '    stream.getVideoTracks().forEach((t) => t.stop());' \
+  '    void stream;' \
+  tests/liveeq.spec.js 'video track is dropped'
+
+mut "Chrome's Stop sharing leaves the app thinking it is live" app.js \
+  '    audio.addEventListener("ended", () => stopLive());' \
+  '    void audio;' \
+  tests/liveeq.spec.js 'Stop sharing ends live mode'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

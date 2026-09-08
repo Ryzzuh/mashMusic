@@ -1302,6 +1302,28 @@ main {
 }
 .eq-tag.live { color: var(--ok); }
 
+/* Sits under the tag, bottom-right, out of the bars' way. Unlike .eq-tag this
+   one must take pointer events — it is the only way to start a live capture. */
+.eq-live {
+  position: absolute;
+  bottom: 7px; right: 12px;
+  appearance: none;
+  padding: 3px 8px;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--ink-3);
+  cursor: pointer;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  transition: color .15s var(--ease), border-color .15s var(--ease);
+}
+.eq-live:hover { color: var(--ink); border-color: var(--ink-3); }
+.eq-live[aria-pressed="true"] { color: var(--ok); border-color: var(--ok); }
+.eq-live[disabled] { opacity: .5; cursor: default; }
+
 /* stacked: give the spectrum a definite height instead of a ratio */
 @media (max-width: 860px) {
   .stage-side { grid-template-rows: auto 88px; }
