@@ -16,7 +16,8 @@ async function stubCapture(page, hz, opts = {}) {
   await page.evaluate(({ hz, noAudio, gain: g }) => {
     const tones = Array.isArray(hz) ? hz : [hz];
     window.__cap = { stopped: 0 };
-    navigator.mediaDevices.getDisplayMedia = async () => {
+    navigator.mediaDevices.getDisplayMedia = async (opts) => {
+      window.__cap.opts = opts;
       const ctx = new AudioContext();
       window.__cap.ctx = ctx;
       const dest = ctx.createMediaStreamDestination();
@@ -243,4 +244,24 @@ test("the spectrum is tilted, so highs are not buried under lows", async ({ page
      67 dB window. Both tones have identical amplitude, so any difference in
      bar height is the tilt and nothing else. */
   expect(high).toBeGreaterThan(low * 1.3);
+});
+
+
+test("the capture asks for this tab, and does not exclude it", async ({ page }) => {
+  /* Chromium has defaulted selfBrowserSurface to "exclude" since 107, which
+     hides the CAPTURING tab from the picker — so the only tab worth sharing
+     here was the one tab not listed. Reported from Edge, which shares the
+     default. preferCurrentTab asks about this tab directly.
+
+     This asserts the request, not the picker: no test can drive a browser's
+     own capture dialog. */
+  await stubCapture(page, 1000);
+  await page.click("#eqLive");
+  const opts = await page.evaluate(() => window.__cap.opts);
+
+  expect(opts.preferCurrentTab).toBe(true);
+  expect(opts.selfBrowserSurface).toBe("include");
+  expect(opts.selfBrowserSurface).not.toBe("exclude");
+  expect(opts.audio).toBeTruthy();                     // audio was asked for
+  expect(opts.audio.suppressLocalAudioPlayback).toBe(false);   // still audible
 });

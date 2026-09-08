@@ -1625,6 +1625,14 @@
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,                        // Chrome refuses an audio-only ask
         audio: { suppressLocalAudioPlayback: false },   // keep hearing it
+        /* Chromium has defaulted selfBrowserSurface to "exclude" since 107,
+           which hides the CAPTURING tab from the picker — so the one tab worth
+           sharing here was the only one not listed. Reported from Edge, which
+           has the same default. preferCurrentTab goes further and asks about
+           this tab directly, skipping the surface picker altogether; both are
+           ignored by browsers that do not know them. */
+        preferCurrentTab: true,
+        selfBrowserSurface: "include",
       });
     } catch (e) {
       // The reader dismissed the picker. Not an error worth shouting about.
@@ -1635,7 +1643,7 @@
     const audio = stream.getAudioTracks()[0];
     if (!audio) {
       stream.getTracks().forEach((t) => t.stop());
-      return { ok: false, error: "That share carried no audio. Pick a tab and tick \u201cshare tab audio\u201d." };
+      return { ok: false, error: "That share carried no audio \u2014 turn on \u201cshare tab audio\u201d." };
     }
     // The frames are of no use to a spectrum; drop them so the capture is
     // audio only and the browser stops encoding video.
@@ -1680,7 +1688,7 @@
     b.textContent = liveActive() ? "live" : "go live";
     b.title = liveActive()
       ? "Stop analysing this tab's audio"
-      : "Analyse this tab's audio for a real spectrum. Pick this tab and tick \u201cshare tab audio\u201d.";
+      : "Analyse this tab's audio for a real spectrum. Allow the prompt, with \u201cshare tab audio\u201d on.";
   }
 
   /* Wired here rather than with the other controls: `live` and liveActive()

@@ -378,15 +378,29 @@ test("changing the list mode near a boundary does not overflow", async ({ page }
 });
 
 test("controls collapse into the panel and come back when there is room", async ({ page }) => {
+  test.setTimeout(120_000);          // three binary searches over the viewport
   const inPanel = () => page.$$eval("#toolsPanel > *", (e) => e.map((x) => x.className.split(" ")[0]));
 
   /* Collapse order is a designed property; the widths at which it happens are
      not, and hard-coding them made this test wrong the moment a control was
-     added. Walk down and record the order things leave the bar in. */
-  const seen = [];
-  for (let w = 1600; w >= 320; w -= 8) {
+     added. So derive them — but by binary search, not by sweeping. A 8px sweep
+     from 1600 to 320 is 160 resizes with two animation frames each, which
+     overran the 30s budget on a machine doing anything else. Three searches
+     cost about 30. */
+  const countAt = async (w) => {
     await page.setViewportSize({ width: w, height: 820 });
     await settle(page);
+    return (await inPanel()).length;
+  };
+
+  const seen = [];
+  for (let target = 1; target <= COLLAPSIBLES.length; target++) {
+    let lo = 320, hi = 1600;                 // count is monotonic as width falls
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (await countAt(mid) >= target) lo = mid; else hi = mid;
+    }
+    await countAt(lo);                       // just inside the boundary
     for (const name of await inPanel()) if (!seen.includes(name)) seen.push(name);
   }
   expect(seen).toEqual(COLLAPSIBLES);

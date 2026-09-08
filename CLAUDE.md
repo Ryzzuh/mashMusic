@@ -53,6 +53,11 @@ consent, so live mode is opt-in and never starts on its own.
 different instruments. Averaging also scales a band with its own width — the
 top band is ~143 bins against the bottom band's ~2.
 
+The capture must pass **`selfBrowserSurface: "include"`** and
+`preferCurrentTab: true`. Chromium has excluded the capturing tab from its own
+picker by default since 107, so without these the one tab worth sharing is the
+only one not listed.
+
 Live is the only option for an imported playlist: envelopes exist for 874
 tracks, and 0 of the first 2,007 imported ids had one.
 

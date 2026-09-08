@@ -538,5 +538,15 @@ mut "Chrome's Stop sharing leaves the app thinking it is live" app.js \
   '    void audio;' \
   tests/liveeq.spec.js 'Stop sharing ends live mode'
 
+mut 'the capturing tab is excluded from its own picker' app.js \
+  '        selfBrowserSurface: "include",' \
+  '        selfBrowserSurface: "exclude",' \
+  tests/liveeq.spec.js 'asks for this tab'
+
+mut 'the capture stops silencing nothing and mutes the tab' app.js \
+  '        audio: { suppressLocalAudioPlayback: false },   // keep hearing it' \
+  '        audio: { suppressLocalAudioPlayback: true },' \
+  tests/liveeq.spec.js 'asks for this tab'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

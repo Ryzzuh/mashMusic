@@ -6,6 +6,41 @@ to undo it.
 
 ---
 
+## 2026-09-08 — The capture has to ask for the tab it is running in
+
+**Reported:** "I don't see this tab listed in the Microsoft Edge tab selector."
+
+**Cause:** Chromium has defaulted `selfBrowserSurface` to `"exclude"` since
+version 107, which hides the **capturing tab itself** from the picker. The
+guidance shipped with the feature — "pick this tab" — described something the
+browser had removed from the list. Edge shares the default.
+
+**Fixed with two options:** `selfBrowserSurface: "include"` puts this tab back
+in the list, and `preferCurrentTab: true` goes further and asks about this tab
+directly, skipping the surface picker. Both are ignored by browsers that do not
+know them.
+
+**Verified they are real rather than trusted to documentation:** passing an
+invalid value for `selfBrowserSurface` throws a `TypeError` from
+`getDisplayMedia`, which only happens for a dictionary member the
+implementation actually reads. The combination of both options was then checked
+to reach the permission stage without a validation error, since the spec
+forbids `preferCurrentTab` alongside `selfBrowserSurface: "exclude"`.
+
+**Not verifiable here:** no test can drive a browser's own capture dialog, and
+the Browser pane blocks capture outright. The test asserts the *request* —
+`preferCurrentTab: true`, `selfBrowserSurface` not `"exclude"`, audio asked for
+with `suppressLocalAudioPlayback: false` — with a mutation check for each.
+Whether the tab now appears is Rhys's to confirm in Edge.
+
+**Separately, a test of mine was too expensive.** The rewritten collapse-order
+test swept 1600→320px in 8px steps: 160 resizes at two animation frames each,
+which overran the 30s budget and failed on a busy machine. It binary-searches
+the three boundaries instead — about 30 resizes — for the same answer. Deriving
+a value beats hard-coding it, but not at any cost.
+
+---
+
 ## 2026-09-08 — A live spectrum, from the tab's own audio
 
 **Why now:** the 2,007-track sheet import made the precomputed approach's limit
