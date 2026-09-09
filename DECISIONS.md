@@ -6,6 +6,430 @@ to undo it.
 
 ---
 
+## 2026-09-09 — A resolve API, and why its key cannot be IP-restricted
+
+**Asked for:** put `resolve-meta` behind a Vercel API so the frontend can ask
+for metadata, with the API key restricted to Vercel's IP.
+
+**The restriction is not available, and this was checked rather than assumed.**
+Google allows exactly **one** application restriction per key, and neither
+option fits a serverless function:
+
+- **IP addresses** need a stable egress address. Vercel functions egress from
+  shared, rotating IPs. A fixed one is Static IPs: **$100/month per project,
+  Pro or Enterprise, Hobby excluded outright.**
+- **HTTP referrers** are for browser keys. A server sends no `Referer`, so it
+  would reject every call.
+
+What *is* available and does matter is the **API** restriction — key limited to
+YouTube Data API v3, so a leak cannot reach anything else on the project.
+
+**The security model therefore moves from the key to the endpoint,** and the
+honest framing is that the endpoint is public. Anyone reading the site's source
+finds the URL. Three things make that a non-event, in order of how much they
+actually do:
+
+1. **Caching.** `s-maxage=86400, stale-while-revalidate=604800`. Metadata does
+   not change, so an id costs quota once and is then served by the CDN. This
+   does more than any allowlist would.
+2. **Strict input validation** — `[A-Za-z0-9_-]{11}`, at most 50. Without it
+   the endpoint is an open proxy forwarding anything to googleapis.com on the
+   key's behalf. This is the bulk of what its tests cover.
+3. **CORS pinned to the site's origins.** Stops other websites; does not stop
+   `curl`, and does not pretend to.
+
+Worst case is a free 10,000/day allowance resetting at midnight Pacific, with
+no billing attached. A shared secret in the frontend was considered and
+rejected: it is extractable by anyone who can already read the endpoint URL.
+
+**Three tiers, each falling through:** `data/meta.json` (committed, free,
+offline) → the API (keyed, batched, cached) → oEmbed and cueing (keyless).
+**Empty configuration is a supported state**, not a broken one — a visitor who
+never deploys anything still gets a working site, and there is a test asserting
+the keyless path is untouched.
+
+**Configuration moved out of `app.js` into `config.js`.** It began as a
+constant, which meant tests could not set it and Rhys would have had to edit
+application code to deploy. `config.js` is a plain script like `data/tracks.js`
+— so it works from `file://` — and it does not overwrite an existing value,
+which is what lets a test set one before the page loads.
+
+**A mutation the tests could not see, and what it taught.** Returning `{}`
+instead of `null` from a failed API call still falls through to oEmbed, so
+"falls back" could not detect it. The real property is different: `null`
+**stops asking an endpoint already known to be down**. With one batch there is
+no difference; with two there is. The test now imports 60 ids and asserts the
+failing endpoint was called once, not twice.
+
+**A flaw in a test of mine, worth recording because it looked fine.** The
+"at most 50 ids" check appeared broken until the test was read: it generated
+ids as `"a".repeat(10) + (i % 10)`, which is only ten distinct values, and the
+handler's `Set` deduped 51 down to 10 before the count was ever checked. The
+handler was right; the test was asking the wrong question.
+
+---
+
+## 2026-09-09 — A committed metadata sidecar, so the key lives in one place
+
+**The question that settled the design:** "how do I access the optional key
+field from other workstations?" The answer is that you cannot —
+`localStorage` does not sync between machines, browser profile sync does not
+cover it, and a key does not belong in a URL where it would land in history and
+`Referer` headers.
+
+**Verified, because it is the crux and the intuition is wrong:** OAuth does not
+help. YouTube quota is charged to the Cloud *project*, never to the signed-in
+user, so making people sign in would let them read their own data while still
+spending Rhys's 10,000/day. There is no per-user quota in the Data API. Signing
+in buys access, not capacity.
+
+**So the key was the wrong thing to distribute.** What is wanted on every
+machine is the *results*, and those are not secret. `tools/resolve-meta.mjs`
+runs once where a key exists and writes `data/meta.json`, which is committed
+and merged on load exactly like `liveness.json` and `replacements.json`.
+
+`videos.list` takes 50 ids per call, bills **one** quota unit regardless, and
+returns title, channel, duration **and `embeddable`** together — 2,007 tracks
+in 41 calls and 41 units of a free 10,000/day allowance, against ~2,000 oEmbed
+requests plus ~17 minutes of cueing a hidden player for durations the API gives
+away. It also closes the last gap: `embeddable` is the one field neither oEmbed
+nor a cue reports cleanly.
+
+**No in-app key field was built.** It was the obvious answer and it is the
+wrong one: it optimises for one machine, adds a settings surface for a
+single-user convenience, and does nothing for visitors. The sidecar helps
+everyone who opens the site and needs no UI at all.
+
+**A shape trap avoided:** the "video is gone" entry first used `{ s: "gone",
+t: 1 }`. `t` is the *title* everywhere else in this codebase, and reusing it
+for a timestamp would have been a trap for whoever read it next. It is
+`{ gone: true }`.
+
+**A bug of mine, and then the harness deleting my fix for it.** `applyMeta()`
+short-circuits when a record's title and duration already match the sidecar.
+The `embeddable` check sat below that line, so an import that had pre-filled
+its fields from the sidecar skipped every blocked verdict — caught by a test,
+fixed by moving the check above the short-circuit. Then the mutation harness
+reported that check as MISSED, because removing the pre-fill (see below) meant
+records are empty on import and the short-circuit no longer fires there. The
+ordering still matters on a later load where the fields already match, so that
+is now the scenario the test covers: **the sidecar's verdicts apply on every
+load, not only when a field changes.**
+
+**Redundant code the harness found.** The importer also pre-filled each new
+record from the sidecar. `applyMeta()` runs immediately afterwards and does the
+same work, so disabling the pre-fill changed nothing and the mutation check
+went MISSED. Removed rather than papered over — a check that cannot fail is
+telling you the code has nothing to say.
+
+**Not verified:** an actual `videos.list` response. There is no key on this
+machine, so the tool's network half has never run, exactly as
+`find-replacements.mjs` has not. What *is* verified end-to-end is the sheet
+half — run against the real 2,007-track sheet, it read every id, estimated 41
+quota units, reported the missing key clearly and wrote nothing — plus the
+pure functions (ISO-8601 durations, id extraction, sheet-ref parsing) and the
+whole app-side merge against a stubbed sidecar.
+
+---
+
+## 2026-09-08 — Durations resolve in the background, by cueing not playing
+
+**Asked for:** batch-resolve durations silently while a playlist loads, with
+`Resolving — <id>` shown until title and duration arrive.
+
+**The options, measured rather than assumed:**
+
+- **oEmbed** carries no duration. Confirmed.
+- **`videos.list`** does, and is CORS-open — 2,007 ids in 41 requests at one
+  quota unit each, plus `embeddable` for free. Strictly the best answer, but it
+  needs an API key that cannot ship in a static page.
+- **The IFrame Player API** reports a duration from a **cued** video.
+  `cueVideoById()` puts the player in state 5 (CUED) and `getDuration()` then
+  answers. Nothing streams, so it is not a view, and it is the official
+  embed API used for its documented purpose.
+
+**Chosen:** a hidden, muted, off-screen player that cues each unresolved track
+in turn. Keyless, no setup, resumable across sessions.
+
+**A measurement that was wrong, and how:** the first probe reported ~8 seconds
+per track, which would have made a 2,000-track playlist take 4.5 hours and
+killed the idea. It was polling `getDuration()`, which kept returning the
+**previous** video's value — visible because two consecutive lookups returned
+identical durations for different videos. Waiting for the cue event instead
+gives ~**0.5 s** per track and correct answers: ~17 minutes for 2,007, or
+about five in parallel. Never poll a player for a value that belongs to
+whatever it loaded last.
+
+**Two bugs found only by running it against the real 2,007-track sheet, both
+invisible to the tests:**
+
+1. **The loop was gated on `document.hidden`.** Precisely backwards — a
+   17-minute background job should keep going when the tab is not in front,
+   which is when it is least in the way. Measured: an off-screen player in a
+   hidden tab still answers in ~0.5 s.
+2. **Durations were persisted only in the `finally` block.** 157 resolved in
+   memory and every one was lost on reload, while the liveness verdicts from
+   the same loop survived because `markLiveness` writes immediately. Now
+   written every ten resolutions — batched because the store is a single JSON
+   blob and rewriting it 2,000 times is pointless.
+
+**A refusal is a verdict, as with the oEmbed 404s.** Cue errors 100/101/150 are
+the same codes the real player reports, so they are recorded as `gone` or
+`blocked` instead of being discarded. Against the real sheet that surfaced
+**25 embed-blocked tracks** the title fetch could not have found — oEmbed
+answers 200 for those.
+
+**Cross-checked against a known value:** "Peverelist Old School Jungle Mixtape"
+resolved to 4024 s, and the player had independently reported 1:07:04 for the
+same track when played.
+
+**A mutation check went MISSED because the fake was too kind:** it aliased
+`loadVideoById` to `cueVideoById`, so "the resolver plays instead of cueing"
+was undetectable. The fake now sends state 1 for a load and state 5 for a cue,
+and records both, so the test can assert nothing was ever played.
+
+---
+
+## 2026-09-08 — The capture has to ask for the tab it is running in
+
+**Reported:** "I don't see this tab listed in the Microsoft Edge tab selector."
+
+**Cause:** Chromium has defaulted `selfBrowserSurface` to `"exclude"` since
+version 107, which hides the **capturing tab itself** from the picker. The
+guidance shipped with the feature — "pick this tab" — described something the
+browser had removed from the list. Edge shares the default.
+
+**Fixed with two options:** `selfBrowserSurface: "include"` puts this tab back
+in the list, and `preferCurrentTab: true` goes further and asks about this tab
+directly, skipping the surface picker. Both are ignored by browsers that do not
+know them.
+
+**Verified they are real rather than trusted to documentation:** passing an
+invalid value for `selfBrowserSurface` throws a `TypeError` from
+`getDisplayMedia`, which only happens for a dictionary member the
+implementation actually reads. The combination of both options was then checked
+to reach the permission stage without a validation error, since the spec
+forbids `preferCurrentTab` alongside `selfBrowserSurface: "exclude"`.
+
+**Not verifiable here:** no test can drive a browser's own capture dialog, and
+the Browser pane blocks capture outright. The test asserts the *request* —
+`preferCurrentTab: true`, `selfBrowserSurface` not `"exclude"`, audio asked for
+with `suppressLocalAudioPlayback: false` — with a mutation check for each.
+Whether the tab now appears is Rhys's to confirm in Edge.
+
+**Separately, a test of mine was too expensive.** The rewritten collapse-order
+test swept 1600→320px in 8px steps: 160 resizes at two animation frames each,
+which overran the 30s budget and failed on a busy machine. It binary-searches
+the three boundaries instead — about 30 resizes — for the same answer. Deriving
+a value beats hard-coding it, but not at any cost.
+
+---
+
+## 2026-09-08 — A live spectrum, from the tab's own audio
+
+**Why now:** the 2,007-track sheet import made the precomputed approach's limit
+concrete. Envelopes exist only for the 874 tracks `build-envelopes.py`
+processed; **0 of the 2,007 imported ids had one**, and none ever would without
+hours of `yt-dlp`. A library you can add to cannot be served by a pipeline that
+has to be run beforehand.
+
+**The constraint that made this look impossible was real but narrower than
+recorded.** Web Audio cannot reach inside a cross-origin iframe — verified
+again: `contentDocument` throws, and there is no same-origin media element to
+attach `createMediaElementSource` to. But Web Audio can analyse a
+**MediaStream**, and `getDisplayMedia` will hand over a tab's audio with the
+reader's consent. So the barrier was never Web Audio; it was that nothing had
+asked the reader.
+
+**Chosen:** an opt-in "go live" control on the spectrum. When on, the bars show
+the tab's actual audio and the precomputed path is bypassed entirely.
+
+- Never started on its own. A page that asks to capture your screen unprompted
+  is not one to trust, and there is a test asserting the app has not called
+  `getDisplayMedia` without a click.
+- The video track is stopped the moment the stream arrives; only audio is kept.
+- The analyser is deliberately **not** connected to `ctx.destination` — the tab
+  is already playing this audio and routing it back would double it.
+- Chrome's own "Stop sharing" ends the track without telling the page, so the
+  track's `ended` event returns the app to envelope mode.
+
+**A real mismatch this surfaced, found by a test that would not pass.** The
+live path averaged power across each band; `tools/build-envelopes.py` takes the
+band's **peak bin** (`mag[:, b0:b1].max(axis=1)`). Two consequences: the two
+sources would have looked like different instruments, and averaging scales a
+band's level with its own width — the top band spans ~143 bins against the
+bottom band's ~2, so a pure tone up there was diluted by ~18 dB and almost
+exactly cancelled the 16 dB tilt. Measured across five amplitudes before
+changing anything. The live path now takes the peak, matching the pipeline.
+
+**Two mutation checks went MISSED first, and both were the test's fault:**
+
+- The bar-height helper scanned the whole canvas column, so it measured the 1px
+  grid line the app draws every frame regardless. "A bar was drawn" was
+  therefore true with the live source disconnected. It now scans only above the
+  baseline.
+- Tilt cannot be detected with one tone: it changes how tall a band is, not
+  which band a tone lands in. The test now uses two tones of identical
+  amplitude six octaves apart, so any height difference is the tilt alone.
+
+**`settleBars` polls rather than sleeping.** A fixed 700 ms wait measured a
+rising edge under load and failed three of these tests on a busy machine while
+passing on an idle one — the suite's own rule, broken in new code.
+
+**A load-order trap:** the control was wired next to the other buttons, ~400
+lines above where `live` and `liveActive()` are declared, which put
+`paintLiveBtn()` in their temporal dead zone. It threw on every load and left
+the button inert while everything else worked. The wiring now sits with the
+definitions.
+
+**Known limits.** macOS Chrome delivers audio only for a **tab** share; a
+window or whole-screen share yields a stream with no audio track, which is
+reported rather than silently doing nothing. The capture ends when the reader
+stops sharing, and there is no way to restart it without another prompt — a
+browser guarantee, not something to work around.
+
+**Not done:** the live path normalises against fixed dBFS bounds
+(`LIVE_FLOOR`/`LIVE_CEIL`) while the offline path normalises per track against
+that track's own peak. Live has no whole track to look at, so the two cannot be
+identical; a rolling peak would close the gap if the fixed window proves wrong
+in use.
+
+---
+
+## 2026-09-08 — Imported titles are fetched lazily, and a 404 is a verdict
+
+**What went wrong first:** the first real sheet held **2,007 ids**. The
+importer fetched metadata under the liveness politeness ledger — 300 requests a
+day, 220 already spent — so about 80 tracks got titles and roughly 1,900 were
+stored with the bare id in the title field. The list was a wall of ids.
+
+Two separate mistakes:
+
+1. **A user-initiated import shared a background budget.** That ledger exists
+   to stop a background nicety hammering someone else's servers. An import is
+   the foreground thing the reader just asked for; letting a background check
+   spend its allowance is exactly backwards. The import no longer touches it.
+2. **A missing title was written as the id.** That turns a transient fetch
+   failure into permanent data — later, nothing can distinguish it from a track
+   genuinely named `hm9UwjS43Rg`. A missing title is now stored as `""`.
+
+**Chosen:** titles are fetched on demand. The import covers the first
+screenful so the list is never a wall of ids; every later row asks for its own
+title as it renders. This is independent of sheet size — 2,007 ids import as
+fast as 20.
+
+A row still waiting shows its **id in the mono face used for ids elsewhere and
+dimmed**, so it reads as "not known yet" rather than as a name.
+
+**A 404 is recorded as a dead track, not as a pending title.** Of the first 60
+ids in the real sheet, **11 were deleted videos**. oEmbed answers 404 for those
+— the same signal `oembedStatus` already uses for liveness — so one round trip
+now fetches the title *and* settles whether the track exists. The unavailable
+count, HIDDEN mode and the replacement finder all pick it up for free. A
+request that never lands is kept distinct and records nothing: no verdict was
+given.
+
+**A bug this hid, found only by checking the store:** the first version looked
+up the track in `TRACKS` before calling `markLiveness`, but the eager pass runs
+before `rebuildLibrary()` has folded imported tracks in, so the lookup found
+nothing and every verdict was silently dropped. `markedGone` was 0 with 11
+genuinely dead tracks on screen. It now falls back to the stored record, which
+carries the key.
+
+**Also:** `selectPlaylist` repaints the idle copy. It names the playlist, so it
+went stale on a switch and claimed "1,257 tracks, posted by friends between
+2012 and 2015" while a 2,007-track sheet was showing.
+
+**Known and not fixed:** an imported track's `c` field is its import date and
+is rendered in the same position as the library's 2015 posting date, so it
+reads as though the track was posted today.
+
+**The EQ cannot work for imported tracks.** Measured against the real sheet: 0
+of 2,007 ids have a precomputed envelope, because envelopes exist only for the
+874 tracks `build-envelopes.py` processed from the 2015 library. Playing one
+shows "no envelope" and an idle spectrum. The only two ways out are running
+that pipeline over the new ids — hours of `yt-dlp`, with the ToS problem
+already recorded — or the live tab-capture EQ, which needs no precomputation
+and would work for any track. This is the strongest argument yet for building
+it.
+
+---
+
+## 2026-09-08 — Playlists, and the library becomes one of them
+
+**Asked for:** the existing library as the default playlist, a way to add more,
+several methods with the first being a Google Sheets document of YouTube ids,
+placeholders for the rest, and a top-bar button that lets the user pick a type.
+
+**Measured before designing, and both answers changed the shape:**
+
+- **Google Sheets is readable from a static page with no key.** The gviz CSV
+  endpoint answers cross-origin (`type: "cors"`, real CSV). No backend, no
+  proxy, no API key. But an unshared sheet returns an HTML **sign-in page with
+  a 200**, so the importer inspects the body, not the status — without that it
+  reports "no ids found" for what is really a permissions problem and sends you
+  looking at the wrong thing.
+- **oEmbed gives title, channel and thumbnail for a bare id, and never
+  duration.** So imports start at `d: 0` and learn the real figure from the
+  player on first play, rather than requiring a key.
+
+**Chosen:** playlists switch, one at a time, with the built-in library as the
+default. Membership is a single predicate in `buildView()` — the same shape
+favourites, contributors and sources already use — so the wheel, autoplay, the
+counts and the transport readouts all follow a switch without knowing playlists
+exist.
+
+**`TRACKS` is no longer a constant.** It is the built-in library plus whatever
+playlists have imported, rebuilt by `rebuildLibrary()`. `ALL_WHO` and the
+contributor panel were computed once at load and are now recomputed with it.
+
+**`scopeCount()` rather than `TRACKS.length` for the counters.** `TRACKS` is
+every track the app knows about, including ones imported by a playlist you are
+not looking at, so the brand count claimed a total it was not showing.
+
+**`K_WHO` is no longer filtered against `ALL_WHO` on read.** It used to be, and
+that silently dropped any name not in the current universe — switching to a
+playlist would have discarded the entire contributor selection on read and
+never given it back. Unknown names are harmless: they match nothing, and return
+when their playlist does.
+
+**Placeholders are selectable, not disabled.** Disabling them made the four
+unbuilt methods unreachable, which meant the dispatcher was never exercised and
+"a placeholder quietly succeeds" could not be caught by any test. They now
+select, disable the field, and report why they cannot run.
+
+**A second test-only seam, `mash:duration`.** For the same reason as
+`mash:completed`: the player's duration arrives inside a cross-origin iframe
+the suite blocks, so the alternative was shipping the write-back untested.
+
+**Three class collisions, all found by tests rather than reasoning.** The
+control began as `class="listmode playlist"` reusing the list-mode styling.
+That broke `COLLAPSE_ORDER`'s `querySelector(".listmode")` (which then matched
+the playlist), the outside-click handler, `.listmode-menu button` (5 elements,
+not 3) and `.search` (2 elements, not 1). Shared *styling* is fine; shared
+*class names* are not, when JS and tests select on them. Each is now its own
+class with the CSS selector extended.
+
+**Not verified live:** a successful import from a real sheet. Both halves are
+proven against the real services — the Sheets fetch end-to-end through the UI
+(it correctly reported "no ids" for Google's public sample), and oEmbed
+returning a real title for a real id — but no public sheet containing YouTube
+ids exists to test their combination. That needs one link-viewable sheet.
+
+**Three tests passed for the wrong reason and the mutation harness caught all
+three:** imported tracks are appended past position 1,257 and only 60 rows
+render, so scanning `.trow` could never see them; every built-in track has a
+non-zero duration, making one guard clause unreachable and its mutant a throw
+rather than an observable change; and ArrowRight followed by ArrowLeft returns
+to the same track, so the keyboard-guard test cancelled itself out.
+
+**To reverse:** the predicate in `buildView()`, `rebuildLibrary`,
+`selectPlaylist`, the import block and the playlist UI block in `app.js`, the
+`.playlist` control and `#plModal` in `index.html`. Removing them leaves the
+built-in library exactly as it was; `t.imported` becomes vestigial.
+
+---
+
 ## 2026-09-07 — Liveness is checked in two places, and verdicts carry provenance
 
 **Asked for:** check-liveness to work two ways — as a batch that estimates

@@ -18,7 +18,7 @@ open. That is the state as of this writing.
 
 - All nine milestones of the feature spec (Jukebox 1, 2, 3, 11; QoL 1, 2, 4, 5,
   6, 7, 8, 10; touchups 1, 2).
-- 130 Playwright tests, 51 mutation checks in `tools/mutate.sh`, all passing.
+- 188 Playwright tests, 96 mutation checks in `tools/mutate.sh`, all passing.
 - Fonts self-hosted in `assets/fonts/`.
 - SoundCloud spectral envelopes merged into `Ryzzuh/mashMusic-eq` `main` and
   serving: 241/312 SoundCloud tracks (77%), 633/945 YouTube (66%).
@@ -134,6 +134,7 @@ is not a listen* — would ship untested.
 | `tools/find-replacements.mjs` | YouTube replacement search. **Never run; needs an API key.** |
 | `tools/serve.py` | Dev server; no-store, maps `/mashMusic-eq/`. |
 | `tests/helpers.js` | Shared helpers. `isHittable()` is strict; do not add an opt-out. |
+| `tests/playlist.spec.js` | Playlists and the Sheets importer. |
 | `DECISIONS.md` | 54 entries, newest first. Read before relitigating anything. |
 | `legacy/` | The 2015 AngularJS original, preserved. |
 | `PR-BODY.md` | Description used for PR #1. Historical; safe to delete. |
@@ -156,6 +157,27 @@ is not a listen* — would ship untested.
   third-party requests on load.
 
 ## Open TODOs
+
+0. **Deploy `server/` to Vercel** (optional but recommended) — full steps in
+   `server/README.md`. Free key, free Hobby plan. Then set `metaApi` in
+   `config.js`. Note the key **cannot** be IP-restricted: Vercel static IPs
+   are $100/month, Pro/Enterprise only. Set "Application restrictions: None"
+   plus "API restrictions: YouTube Data API v3".
+
+0a. **Or run `tools/resolve-meta.mjs` with a YouTube API key** and commit
+   `data/meta.json`. Free key, no card; 2,007 tracks costs 41 of a
+   10,000/day allowance. This is the one place a key is needed — every other
+   machine and every visitor then resolves titles and durations instantly with
+   no key. The tool has never made a `videos.list` call (no key on this
+   machine); its sheet half and the whole app-side merge are verified.
+
+0b. **Create one public Google Sheet with YouTube ids in it** and import it
+   through the UI. This is the only unproven part of the playlist feature: the
+   Sheets fetch and the oEmbed lookup are each verified against the real
+   services, but their combination is only tested against stubs, because no
+   public sheet containing YouTube ids was available. Share it
+   "anyone with the link can view", then paste the link into
+   Playlist → Add playlist.
 
 1. **Populate liveness for real.** The in-app batch (the `check N of M`
    control in the status bar) needs no key and can run today — 25 tracks a

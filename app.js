@@ -12,7 +12,13 @@
   const $ = (id) => document.getElementById(id);
   const CHUNK = 60;
 
-  const TRACKS = (window.MASH_TRACKS || []).map((t, i) => ({ ...t, n: i + 1 }));
+  /* The built-in library: the 1,257 tracks tools/build-tracks.py baked out of
+     the 2015 dataset. `k` ships in the data, so it is never derived here.
+     TRACKS is this plus whatever playlists have imported — see rebuildLibrary.
+     It is reassigned rather than mutated so no stale reference can outlive a
+     rebuild; every reader goes through the binding. */
+  const BUILTIN = (window.MASH_TRACKS || []).map((t, i) => ({ ...t, n: i + 1 }));
+  let TRACKS = BUILTIN;
 
   // ------------------------------------------------------------------ stores
 
@@ -37,6 +43,9 @@
   const K_PLAYED = "mash.played.v1";
   const K_SWAP = "mash.replacements.v1";
   const K_CHECK = "mash.livecheck.v1";
+  const K_LISTS = "mash.playlists.v1";
+  const K_IMPORT = "mash.imported.v1";
+  const K_LIST = "mash.playlist.v1";
 
   /* Liveness:
    *   { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch>,
@@ -80,11 +89,17 @@
    * predicate in buildView() is a no-op until something is deselected. Names
    * come from the same field the panel ranks, so the two cannot drift. */
   const contributorOf = (t) => t.v || "Unattributed";
-  const ALL_WHO = [...new Set(TRACKS.map(contributorOf))];
+  /* Was a const computed once at load. A playlist can narrow or widen the
+     contributor universe, so it is now recomputed by rebuildLibrary(). */
+  let ALL_WHO = [];
   const storedWho = store.read(K_WHO, null);
-  const who = new Set(
-    Array.isArray(storedWho) ? storedWho.filter((n) => ALL_WHO.includes(n)) : ALL_WHO
-  );
+  /* Deliberately NOT filtered against ALL_WHO here. It used to be, and that
+     silently dropped a name the moment the universe narrowed — switching to a
+     playlist would have discarded the whole contributor selection on read and
+     never given it back. Unknown names are harmless: they simply match nothing
+     in buildView(), and come back when their playlist does. */
+  const who = new Set(Array.isArray(storedWho) ? storedWho : []);
+  let whoWasStored = Array.isArray(storedWho);
   const everyoneSelected = () => ALL_WHO.every((n) => who.has(n));
   /* Source filter. Two independent toggles rather than a two-position switch:
    * a switch that can only ever select one source could never show the whole
@@ -97,6 +112,83 @@
   if (!sources.size) ALL_SOURCES.forEach((x) => sources.add(x));   // same guard as the click path
 
   const prefs = Object.assign({ skin: "jukebox", listMode: "show" }, store.read(K_PREF, {}));
+
+  // --------------------------------------------------------------- playlists
+
+  /* The built-in library is the default playlist and is not stored: it is
+     whatever tools/build-tracks.py shipped. Imported playlists are lists of
+     track keys; the track objects they refer to live in K_IMPORT so a reload
+     does not have to re-fetch anyone's metadata.
+
+     One playlist is visible at a time. Membership is a single predicate in
+     buildView() — the same shape favourites, contributors and sources already
+     use — so the wheel, autoplay, the counts and the transport readouts all
+     follow a playlist switch without knowing playlists exist. */
+  let playlists = store.read(K_LISTS, []);
+  if (!Array.isArray(playlists)) playlists = [];
+  const imported = store.read(K_IMPORT, {}) || {};
+  let currentList = store.read(K_LIST, null);
+  let playlistKeys = null;             // null means the built-in library
+  let booted = false;
+
+  const listById = (id) => playlists.find((p) => p.id === id) || null;
+  const currentListName = () => (currentList ? (listById(currentList)?.name || "Playlist") : "Library");
+
+  function rebuildLibrary() {
+    // A playlist that no longer exists must not leave the app showing nothing.
+    if (currentList && !listById(currentList)) currentList = null;
+
+    const extra = Object.values(imported);
+    TRACKS = extra.length
+      ? BUILTIN.concat(extra.map((t, i) => ({ ...t, imported: true, n: BUILTIN.length + i + 1 })))
+      : BUILTIN;
+
+    ALL_WHO = [...new Set(TRACKS.map(contributorOf))];
+    // Nothing stored means "everyone", which has to be recomputed as the
+    // universe grows or a newly imported contributor would start deselected.
+    if (!whoWasStored) { who.clear(); ALL_WHO.forEach((n) => who.add(n)); }
+
+    playlistKeys = currentList ? new Set(listById(currentList).keys || []) : null;
+
+    // uncheckedTracks() is declared below; at boot its own initialiser runs
+    // after this and gets the right number anyway.
+    if (booted) uncheckedCount = uncheckedTracks().length;
+  }
+  rebuildLibrary();
+
+  /* How many tracks the current playlist contains, before any other filter.
+     Not TRACKS.length: that is every track the app knows about, including ones
+     imported by playlists you are not looking at, so using it made the Library
+     claim a total it was not showing. */
+  const scopeCount = () => (playlistKeys ? playlistKeys.size : BUILTIN.length);
+
+  /* The stop-button copy describes the 2015 archive, which is only true of the
+     built-in library — a playlist gets its own name instead of inheriting a
+     provenance that is not its. */
+  const idleCopy = () => (currentList
+    ? `${scopeCount().toLocaleString()} tracks in ${currentListName()}.`
+    : `${BUILTIN.length.toLocaleString()} tracks, posted by friends between 2012 and 2015.`);
+
+  function saveLists() {
+    store.write(K_LISTS, playlists);
+    store.write(K_IMPORT, imported);
+    store.write(K_LIST, currentList);
+  }
+
+  function selectPlaylist(id) {
+    currentList = id || null;
+    rebuildLibrary();
+    store.write(K_LIST, currentList);
+    paintPlaylist();
+    buildContributors();       // the contributor universe just changed
+    render(true);
+    // The idle copy names the playlist, so it goes stale on a switch unless
+    // something repaints it. Only when nothing is playing: otherwise this is
+    // the now-playing line and belongs to the track.
+    if (!state.current) $("npSub").textContent = idleCopy();
+    resolveDurations();
+  }
+
 
   /* "gone" and "blocked" are verdicts — the platform told us. "stalled" is a
    * suspicion raised by the watchdog, which a slow network can also trigger,
@@ -396,6 +488,10 @@
   function buildView() {
     const q = state.query.trim().toLowerCase();
     state.view = TRACKS.filter((t) => {
+      /* Playlist membership. Default (null) is the built-in library, so an
+         imported track is only ever visible inside a playlist that names it. */
+      if (playlistKeys) { if (!playlistKeys.has(t.k)) return false; }
+      else if (t.imported) return false;
       if (played.has(t.k)) return false;
       // "hide" no longer redacts titles; it drops the tracks the platforms
       // have lost — the same set the status bar counts as unavailable
@@ -464,7 +560,14 @@
     const via = document.createElement("span");
     via.className = "t-via";
 
-    name.textContent = track.t;
+    if (track.t) {
+      name.textContent = track.t;
+    } else {
+      // Title not known yet. Say so, and show what IS known — never the bare
+      // id on its own, which reads as though the track is called that.
+      name.textContent = "Resolving \u2014 " + track.i;
+      name.classList.add("is-pending");
+    }
     via.textContent = track.v ? "via " + track.v : "";
     main.append(name, via);
 
@@ -539,6 +642,7 @@
     listEl.appendChild(frag);
     $("listEnd").hidden = state.shown < state.order.length;
     if (!bulkRender) paintStatus();
+    backfillRendered();
   }
 
   function render(rebuild) {
@@ -568,13 +672,13 @@
     paintTransportFlanks();
     $("statLoaded").textContent =
       `showing ${state.shown} / ${state.order.length}` +
-      (state.order.length !== TRACKS.length ? ` (of ${TRACKS.length})` : "");
+      (state.order.length !== scopeCount() ? ` (of ${scopeCount()})` : "");
     $("statDead").textContent = deadCount ? `${deadCount} unavailable` : "";
     paintCheckButton();
     const pl = $("statPlayed");
     pl.hidden = !played.size;
     pl.textContent = `${played.size} played \u00b7 reset`;
-    $("brandCount").textContent = `${TRACKS.length} tracks`;
+    $("brandCount").textContent = `${scopeCount()} tracks`;
   }
 
   function paintCheckButton() {
@@ -591,6 +695,483 @@
     b.title = budget > 0
       ? `Ask YouTube and SoundCloud whether these ids still resolve. ${budget} requests left today.`
       : "Today's check budget is spent; it resets at midnight.";
+  }
+
+  // ------------------------------------------------------- playlist import
+
+  /* A Google Sheet is readable from a static page with no key and no backend:
+     the gviz endpoint answers cross-origin (measured 2026-09-08). What it does
+     NOT do is fail loudly — a sheet that is not shared returns an HTML sign-in
+     page with a 200, so the body has to be inspected, not just the status. */
+  const SHEET_ID = /\/spreadsheets\/d\/(?:e\/)?([A-Za-z0-9_-]{16,})/;
+  const YT_ID = /^[A-Za-z0-9_-]{11}$/;
+  const YT_IN_URL = /(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([A-Za-z0-9_-]{11})/;
+
+  /** A full Sheets URL or a bare document id; null if it is neither. */
+  function parseSheetRef(input) {
+    const raw = (input || "").trim();
+    if (!raw) return null;
+    const m = raw.match(SHEET_ID);
+    if (m) {
+      const gid = raw.match(/[#&?]gid=(\d+)/);
+      return { id: m[1], gid: gid ? gid[1] : null };
+    }
+    // A bare id. Deliberately not accepting anything shorter: an 11-character
+    // string is a YouTube id, and treating one as a document is a confusing
+    // failure three network calls later.
+    if (/^[A-Za-z0-9_-]{16,}$/.test(raw)) return { id: raw, gid: null };
+    return null;
+  }
+
+  const sheetCsvUrl = (ref) =>
+    `https://docs.google.com/spreadsheets/d/${ref.id}/gviz/tq?tqx=out:csv` +
+    (ref.gid ? `&gid=${ref.gid}` : "");
+
+  /** Every YouTube id in a blob of CSV, in order, deduped. */
+  function idsFromCsv(text) {
+    const out = [];
+    const seen = new Set();
+    // Cheap split rather than a full CSV parse: the format here is one value
+    // per cell, and quotes/commas inside a YouTube id are impossible.
+    for (const cell of text.split(/[\r\n,]+/)) {
+      const v = cell.replace(/^"+|"+$/g, "").trim();
+      if (!v) continue;
+      const m = v.match(YT_IN_URL);
+      const id = m ? m[1] : (YT_ID.test(v) ? v : null);
+      if (id && !seen.has(id)) { seen.add(id); out.push(id); }
+    }
+    return out;
+  }
+
+  /** Title, channel and thumbnail for an id. No key; no duration available.
+   *
+   * Returns { meta } on success, { gone: true } when YouTube says the video
+   * does not exist, and {} when the request never got an answer. Those last
+   * two must stay distinct: a 404 is permanent and worth recording, a network
+   * blip is neither. */
+  async function ytMeta(id) {
+    const url = "https://www.youtube.com/oembed?format=json&url=" +
+      encodeURIComponent("https://www.youtube.com/watch?v=" + id);
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) return { gone: true, code: res.status };
+      const j = await res.json();
+      return { meta: { t: j.title || id, v: j.author_name || "", a: j.thumbnail_url || "" } };
+    } catch (e) { return {}; }
+  }
+
+  /* The committed metadata sidecar.
+   *
+   * data/meta.json is produced by tools/resolve-meta.mjs on whichever machine
+   * has a YouTube API key, and committed. It exists so a key is needed in
+   * exactly one place, once: localStorage does not sync between workstations
+   * and a key does not belong in a URL, but the RESULTS are not secret and can
+   * simply travel with the repo.
+   *
+   * Consulted before anything asks YouTube, so a machine that has never seen a
+   * playlist still shows real titles and durations the moment it imports the
+   * sheet — no oEmbed calls, no cueing, no waiting. */
+  let metaSidecar = {};
+
+  async function loadMetaSidecar() {
+    try {
+      const res = await fetch("data/meta.json", { cache: "no-store" });
+      if (!res.ok) return;
+      metaSidecar = (await res.json()) || {};
+    } catch (e) {
+      /* no sidecar, or running from file:// — everything still resolves the
+         slow way, which is the whole point of it being optional */
+    }
+    if (applyMeta()) { rebuildLibrary(); render(true); }
+  }
+
+  /** Fill imported records from the sidecar. Returns how many it changed. */
+  function applyMeta() {
+    let n = 0;
+    for (const [k, rec] of Object.entries(imported)) {
+      const m = metaSidecar[k];
+      if (!m) continue;
+      if (m.gone) {
+        markLiveness(TRACKS.find((x) => x.k === k) || rec, "gone", 100, "api");
+        continue;
+      }
+      /* The verdict first. This used to sit below the short-circuit, so an
+         import that had already pre-filled its fields from the sidecar skipped
+         the check entirely and never recorded a single blocked track. */
+      if (m.e === false) {
+        markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
+      }
+      if (rec.t === m.t && rec.d === m.d) continue;      // fields already applied
+      /* videos.list is the most authoritative source available — better than
+         an oEmbed title and better than a duration read off the player — so it
+         wins outright rather than only filling blanks. */
+      rec.t = m.t || rec.t;
+      rec.v = m.v || rec.v;
+      rec.d = m.d || rec.d;
+      rec.a = m.a || rec.a;
+      n++;
+    }
+    if (n) store.write(K_IMPORT, imported);
+    return n;
+  }
+
+  /* The resolve API — the middle tier.
+   *
+   *   data/meta.json   committed, free, offline, zero requests
+   *   META_API         keyed, batched, cached; for ids the sidecar lacks
+   *   oEmbed + cueing  when neither is available
+   *
+   * Set META_API to a deployed server/api/resolve.js (see server/README.md).
+   * Empty means the tier is skipped entirely, which is the default: the app
+   * must keep working for anyone who never deploys one. */
+  const META_API = (window.MASH_CONFIG || {}).metaApi || "";
+  const META_API_BATCH = 50;        // videos.list maximum; the endpoint enforces it too
+
+  /** Ask the API about up to 50 ids. Resolves to a meta map, or null. */
+  async function metaFromApi(ids) {
+    if (!META_API || !ids.length) return null;
+    try {
+      const res = await fetch(META_API + "?ids=" + encodeURIComponent(ids.join(",")),
+        { mode: "cors" });
+      if (!res.ok) return null;     // 429 quota, 503 no key, 502 upstream — all fall through
+      return await res.json();
+    } catch (e) {
+      return null;                  // not deployed, offline, blocked — same answer
+    }
+  }
+
+  /* Metadata backfill.
+   *
+   * A sheet can be any size — the one this was built against holds 2,007 ids —
+   * so fetching every title up front is both slow and rude. Instead every
+   * imported track starts titleless and is filled in on demand: the first
+   * screenful during the import, the rest as their rows come into view.
+   *
+   * A row that is still waiting shows its id in a muted "pending" style, which
+   * is honest about what is known, rather than putting the id where the title
+   * goes and looking like data. */
+  const metaPending = new Set();
+  const metaFailed = new Set();
+  let metaRunning = 0;
+
+  async function fillMeta(keys, onProgress) {
+    const want = keys.filter((k) => imported[k] && !imported[k].t &&
+      !metaPending.has(k) && !metaFailed.has(k));
+    if (!want.length) return 0;
+    want.forEach((k) => metaPending.add(k));
+
+    /* One request per 50 ids, and it carries duration and embeddable too — so
+       a hit here also spares the cue-based duration resolver. oEmbed below is
+       one request per track and knows neither. */
+    let viaApi = 0;
+    for (let i = 0; i < want.length && META_API; i += META_API_BATCH) {
+      const slice = want.slice(i, i + META_API_BATCH);
+      const map = await metaFromApi(slice.map((k) => imported[k].i));
+      if (!map) break;                        // unavailable: stop asking, use oEmbed
+      Object.assign(metaSidecar, map);
+      viaApi += applyMeta();
+      slice.forEach((k) => { if (imported[k].t) metaPending.delete(k); });
+      if (onProgress) onProgress(viaApi);
+    }
+
+    const left = want.filter((k) => imported[k] && !imported[k].t);
+    if (!left.length) { store.write(K_IMPORT, imported); return viaApi; }
+
+    let done = 0, cursor = 0;
+    async function worker() {
+      while (cursor < left.length) {
+        const k = left[cursor++];
+        const rec = imported[k];
+        const res = await ytMeta(rec.i);
+        if (res.meta) {
+          const meta = res.meta;
+          rec.t = meta.t; rec.v = meta.v; rec.a = meta.a;
+          // the live copies in TRACKS and the view are separate objects
+          for (const list of [TRACKS, state.view]) {
+            const t = list.find((x) => x.k === k);
+            if (t) { t.t = meta.t; t.v = meta.v; t.a = meta.a; }
+          }
+          paintRowMeta(k);
+        } else if (res.gone) {
+          /* The same request that fetches a title also answers "does this
+             still exist". A title that will never arrive is not a pending
+             title, it is a dead track — so say so, and let the liveness store,
+             the unavailable count, HIDDEN mode and the replacement finder all
+             pick it up from one round trip. */
+          metaFailed.add(k);
+          /* `|| imported[k]` matters: the eager pass during an import runs
+             before rebuildLibrary() has folded these into TRACKS, so a lookup
+             there finds nothing and the verdict was silently dropped. The
+             stored record carries the key, which is all markLiveness needs. */
+          markLiveness(TRACKS.find((x) => x.k === k) || imported[k],
+                       "gone", res.code || 404, "oembed");
+        }
+        // no `gone` and no meta: the request never landed. Leave it for the
+        // next render pass rather than recording a verdict nobody gave.
+        metaPending.delete(k);
+        done++;
+        if (onProgress) onProgress(done);
+      }
+    }
+    metaRunning++;
+    await Promise.all(Array.from({ length: Math.min(4, left.length) }, worker));
+    metaRunning--;
+    store.write(K_IMPORT, imported);
+    return done + viaApi;
+  }
+
+  /** Update one already-rendered row in place, without rebuilding the list. */
+  function paintRowMeta(key) {
+    const row = rowFor(key);
+    if (!row) return;
+    const rec = imported[key];
+    const name = row.querySelector(".t-name");
+    const via = row.querySelector(".t-via");
+    if (name) { name.textContent = rec.t; name.classList.remove("is-pending"); }
+    if (via) via.textContent = rec.v ? "via " + rec.v : "";
+  }
+
+  /** Ask for titles for whatever has just been rendered. */
+  function backfillRendered() {
+    if (!Object.keys(imported).length) return;
+    const keys = [];
+    listEl.querySelectorAll(".trow").forEach((r) => {
+      const k = r.dataset.key;
+      if (imported[k] && !imported[k].t) keys.push(k);
+    });
+    if (keys.length) fillMeta(keys);
+  }
+
+  /* ------------------------------------------------- background durations
+   *
+   * oEmbed carries no duration, and videos.list — the endpoint that does —
+   * needs an API key that cannot ship in a static page. But the official
+   * IFrame Player API will report one WITHOUT playing anything:
+   * cueVideoById() puts the player in state 5 (CUED) and getDuration() then
+   * answers. Cueing is not a view; nothing streams.
+   *
+   * Measured 2026-09-08 against real ids: ~0.5s per track on a hidden player,
+   * so a 2,000-track sheet resolves in roughly 17 minutes in the background
+   * while the reader gets on with things. (An earlier measurement said 8s and
+   * was wrong: the probe polled getDuration() and kept reading the PREVIOUS
+   * video's value. The cue event is the only safe signal, which is why this
+   * waits for onStateChange rather than polling.)
+   *
+   * If a key ever exists, videos.list does the same job for 2,007 tracks in 41
+   * requests and one quota unit each, and throws in `embeddable` as well. This
+   * is the keyless path, not the best one. */
+  const DUR_TIMEOUT = 12000;
+  const DUR_GAP = 150;                // pause between cues; see the loop below
+  let durPlayer = null;
+  let durReady = false;
+  let durCued = null;                 // resolver for the cue currently in flight
+  let durRunning = false;
+  const durFailed = new Set();        // ids the player refused; do not retry
+
+  const durNeeded = () => Object.values(imported)
+    .filter((t) => !t.d && !durFailed.has(t.k));
+
+  function ensureDurPlayer() {
+    if (durPlayer || !window.YT || !window.YT.Player) return durPlayer;
+    const host = document.createElement("div");
+    host.id = "ytDuration";
+    /* Off-screen rather than display:none — a hidden player is not guaranteed
+       to load metadata, and this must never be visible or audible. */
+    host.style.cssText = "position:fixed;left:-9999px;top:0;width:200px;height:120px";
+    document.body.appendChild(host);
+    durPlayer = new YT.Player(host, {
+      host: "https://www.youtube-nocookie.com",
+      height: 120, width: 200,
+      playerVars: { rel: 0, playsinline: 1 },
+      events: {
+        onReady: () => { durReady = true; try { durPlayer.mute(); } catch (e) {} },
+        onStateChange: (e) => { if (e.data === 5 && durCued) durCued({ ok: true }); },
+        onError: (e) => { if (durCued) durCued({ ok: false, code: e.data }); },
+      },
+    });
+    return durPlayer;
+  }
+
+  /** Cue one id and report its duration. Never plays it. */
+  function cueForDuration(id) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (r) => { if (!done) { done = true; durCued = null; resolve(r); } };
+      durCued = (r) => finish(r.ok ? { d: durPlayer.getDuration() } : { code: r.code });
+      setTimeout(() => finish({ timeout: true }), DUR_TIMEOUT);
+      try { durPlayer.cueVideoById(id); } catch (e) { finish({ error: true }); }
+    });
+  }
+
+  async function resolveDurations() {
+    if (durRunning) return 0;
+    if (!durNeeded().length) return 0;
+    if (!ensureDurPlayer()) return 0;
+
+    durRunning = true;
+    let filled = 0;
+    try {
+      // Wait for the player, but do not wait forever if the API never lands.
+      for (let i = 0; i < 60 && !durReady; i++) await new Promise((r) => setTimeout(r, 250));
+      if (!durReady) return 0;
+
+      let track;
+      let sinceWrite = 0;
+      while ((track = durNeeded()[0])) {
+        /* Deliberately keeps going when the tab is hidden. This was gated on
+           document.hidden at first, which is precisely backwards: resolving
+           2,000 durations takes ~17 minutes, and a background tab is exactly
+           when it should be getting on with it. Measured: an off-screen player
+           in a hidden tab still reports durations in ~0.5s. */
+        const res = await cueForDuration(track.i);
+        if (res.d > 0) {
+          setDuration(track.k, Math.round(res.d));
+          filled++;
+        } else if (res.code) {
+          /* The player refused it. Codes 100/101/150 are the same verdicts the
+             real player reports, so record them rather than just giving up. */
+          durFailed.add(track.k);
+          const status = res.code === 100 ? "gone"
+            : (res.code === 101 || res.code === 150) ? "blocked" : null;
+          if (status) markLiveness(TRACKS.find((x) => x.k === track.k) || imported[track.k],
+                                   status, res.code, "oembed");
+        } else {
+          durFailed.add(track.k);            // timed out; try again next session
+        }
+        /* Persist as we go. This used to write only in the finally below, so a
+           2,000-track run held ~17 minutes of results in memory and lost every
+           one of them if the page was closed or reloaded first. Batched rather
+           than per-track: the store is one JSON blob and rewriting it 2,000
+           times is pointless work. */
+        if (++sinceWrite >= 10) { sinceWrite = 0; store.write(K_IMPORT, imported); }
+        /* Breathing room between cues. Each one is a full player load, and
+           2,000 of them back to back measurably loaded a two-core machine —
+           observed while this ran alongside the test suite. A judgement call,
+           not a tuned figure: it costs ~5 minutes over a 2,000-track sheet
+           that already takes ~17, and the work is meant to be invisible. */
+        await new Promise((r) => setTimeout(r, DUR_GAP));
+      }
+    } finally {
+      durRunning = false;
+      store.write(K_IMPORT, imported);
+      paintStatus();
+    }
+    return filled;
+  }
+
+  /** Write a duration everywhere the same track is held, and repaint its row. */
+  function setDuration(key, secs) {
+    const rec = imported[key];
+    if (rec) rec.d = secs;
+    for (const list of [TRACKS, state.view]) {
+      const t = list.find((x) => x.k === key);
+      if (t) t.d = secs;
+    }
+    const row = rowFor(key);
+    if (row) {
+      const cell = row.querySelector(".t-dur");
+      if (cell) cell.textContent = fmtDur(secs);
+    }
+  }
+
+  function setPlStatus(msg, bad) {
+    const el = $("plStatus");
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.toggle("is-bad", !!bad);
+  }
+
+  /* Placeholders. Real functions with the real signature so the picker, the
+     dispatch and the status line are all exercised — only the body is absent.
+     They must reject, not quietly succeed; a mutation check covers that. */
+  const NOT_BUILT = {
+    paste:  "Pasting a list is not built yet.",
+    ytlist: "YouTube playlist import is not built yet — it needs an API key.",
+    file:   "File upload is not built yet.",
+    scset:  "SoundCloud sets are not built yet — their API has been closed since 2019.",
+  };
+  const importers = {
+    sheets: importFromSheet,
+    paste:  async () => ({ ok: false, error: NOT_BUILT.paste }),
+    ytlist: async () => ({ ok: false, error: NOT_BUILT.ytlist }),
+    file:   async () => ({ ok: false, error: NOT_BUILT.file }),
+    scset:  async () => ({ ok: false, error: NOT_BUILT.scset }),
+  };
+
+  async function importFromSheet(input) {
+    const ref = parseSheetRef(input);
+    if (!ref) return { ok: false, error: "That is not a Sheets link or document id." };
+
+    let text;
+    try {
+      const res = await fetch(sheetCsvUrl(ref), { cache: "no-store" });
+      if (!res.ok) return { ok: false, error: `Google answered ${res.status}. Is the link right?` };
+      text = await res.text();
+    } catch (e) {
+      return { ok: false, error: "Could not reach Google Sheets." };
+    }
+
+    /* The sign-in page arrives as a 200. Without this the importer reports
+       "no YouTube ids found" for what is really a permissions problem, and
+       sends you looking at the wrong thing. */
+    if (/^\s*<(?:!doctype|html)/i.test(text)) {
+      return { ok: false, error: "That sheet is not shared. Set it to \u201canyone with the link can view\u201d." };
+    }
+
+    const ids = idsFromCsv(text);
+    if (!ids.length) return { ok: false, error: "No YouTube ids or links in that sheet." };
+
+    const keys = [];
+    const fresh = [];
+    for (const id of ids) {
+      const k = "YT:" + id;
+      keys.push(k);
+      // Already in the library or already imported: reuse it, ask nobody.
+      if (!TRACKS.some((t) => t.k === k) && !imported[k]) fresh.push({ k, i: id });
+    }
+
+    /* Every id gets a record immediately, with no title. Titles are filled in
+       by fillMeta() — the first screenful now, the rest as their rows render.
+       This does NOT share the liveness politeness ledger. That ledger exists
+       to stop a background nicety hammering someone else's servers; an import
+       is a foreground action the reader asked for, and letting a background
+       check spend its budget produced exactly the wrong outcome: a 2,000-track
+       sheet arrived with 80 titles and 1,900 bare ids.
+
+       A missing title is stored as "" and never as the id. Writing the id into
+       the title field is indistinguishable, later, from a track genuinely
+       called that — it turns a transient fetch failure into permanent data. */
+    for (const item of fresh) {
+      imported[item.k] = {
+        k: item.k, s: "YT", i: item.i,
+        t: "", v: "",
+        d: 0,                       // else learned from the player
+        a: "",
+        c: new Date().toISOString().slice(0, 10),
+      };
+    }
+    store.write(K_IMPORT, imported);
+
+    /* Before anything is asked of YouTube. If these ids were resolved on the
+       machine that has a key, this fills in every title and duration and
+       records the gone/blocked verdicts, and the oEmbed pass below then finds
+       nothing left to do. An earlier draft also pre-filled the records above
+       from the sidecar; that was the same work twice, and the mutation harness
+       showed it by failing to notice its removal. */
+    applyMeta();
+
+    // Enough for the first screenful, so the list is never a wall of ids.
+    const eager = fresh.slice(0, CHUNK).map((f) => f.k);
+    if (eager.length) {
+      setPlStatus(`fetching titles 0/${eager.length}\u2026`);
+      await fillMeta(eager, (n) => setPlStatus(`fetching titles ${n}/${eager.length}\u2026`));
+    }
+
+    const name = `Sheet ${ref.id.slice(0, 6)}`;
+    const id = "pl" + Date.now().toString(36);
+    playlists.push({ id, name, type: "sheets", source: ref.id, keys, added: Date.now() });
+    saveLists();
+    return { ok: true, id, count: keys.length, added: fresh.length };
   }
 
   // ------------------------------------------------------------------ favs
@@ -614,7 +1195,12 @@
       host: "https://www.youtube-nocookie.com",
       playerVars: { rel: 0, playsinline: 1, modestbranding: 1 },
       events: {
-        onReady: () => { ytReady = true; },
+        onReady: () => {
+          ytReady = true;
+          // The API lands well after boot, so the first resolveDurations()
+          // found no YT.Player and gave up. This is the retry.
+          resolveDurations();
+        },
         onStateChange: (e) => {
           if (e.data === YT.PlayerState.ENDED) completed();
           if (e.data === YT.PlayerState.PLAYING) {
@@ -916,13 +1502,18 @@
   $("statPlayed").addEventListener("click", resetPlayed);
   $("statCheck").addEventListener("click", () => { runLivenessBatch(); });
 
-  /* The only seam in the app that exists partly for the tests, and it is here
-   * because the alternative is leaving Jukebox 3 unverified: both end events
-   * fire inside a cross-origin iframe and cannot be synthesised from outside
-   * it. It is a fair extension point in its own right — anything may declare
-   * a track finished — and it carries no privilege the UI does not already
-   * have. Everything else in the suite drives real controls. */
+  /* The two seams in the app that exist partly for the tests, and they are
+   * here because the alternative is leaving the features unverified: the
+   * events they stand in for fire inside a cross-origin iframe and cannot be
+   * synthesised from outside it. Both are fair extension points in their own
+   * right — anything may declare a track finished, or report how long it
+   * turned out to be — and neither carries a privilege the UI does not
+   * already have. Everything else in the suite drives real controls.
+   *
+   * mash:completed  — Jukebox 3, the decaying tracklist.
+   * mash:duration   — an imported track's runtime, which oEmbed never gives. */
   document.addEventListener("mash:completed", completed);
+  document.addEventListener("mash:duration", (e) => learnDuration(state.current, e.detail));
 
   $("tFav").addEventListener("click", () => {
     if (!state.current) return;
@@ -1093,7 +1684,7 @@
     setEqTag("no envelope", false);
     $("npSource").textContent = "—";
     $("npTitle").textContent = "Nothing playing";
-    $("npSub").textContent = TRACKS.length.toLocaleString() + " tracks, posted by friends between 2012 and 2015.";
+    $("npSub").textContent = idleCopy();
     $("npFlags").innerHTML = "";
   });
 
@@ -1211,6 +1802,153 @@
   }
   new ResizeObserver(eqResize).observe(eqCanvas);
 
+  /* ----------------------------------------------------------- live spectrum
+   *
+   * Web Audio cannot reach inside a cross-origin iframe, which is why the
+   * envelopes are precomputed at all. But it CAN analyse a MediaStream, and
+   * getDisplayMedia will hand over a tab's audio with the reader's consent.
+   * So a live spectrum is possible after all — it just costs a permission
+   * prompt, and it is the only option for a track nobody has analysed offline
+   * (an imported playlist has no envelopes at all).
+   *
+   * This is opt-in and per-session by design. It is never started on its own:
+   * a page that asks to capture your screen unprompted is not one to trust.
+   *
+   * macOS note: Chrome only delivers audio for a TAB share. Choosing a window
+   * or the whole screen yields a stream with no audio track, which is why the
+   * missing-track case below is a first-class error rather than a throw. */
+  const LIVE_FLOOR = -85;           // dBFS mapped to an empty bar
+  const LIVE_CEIL = -18;            // dBFS mapped to a full one
+
+  let live = null;                  // { stream, ctx, analyser, bins, edges }
+
+  const liveActive = () => !!(live && live.analyser);
+
+  /** Bin ranges for each of the n log-spaced bands, given the sample rate. */
+  function liveEdges(n, sampleRate, binCount) {
+    const nyquist = sampleRate / 2;
+    const edges = [];
+    for (let i = 0; i < n; i++) {
+      const lo = 40 * Math.pow(16000 / 40, i / n);
+      const hi = 40 * Math.pow(16000 / 40, (i + 1) / n);
+      let a = Math.floor((lo / nyquist) * binCount);
+      let b = Math.ceil((hi / nyquist) * binCount);
+      a = Math.max(0, Math.min(binCount - 1, a));
+      b = Math.max(a + 1, Math.min(binCount, b));
+      edges.push([a, b]);
+    }
+    return edges;
+  }
+
+  /** Fill `out` with the current spectrum, shaped like sampleEnvelope's. */
+  function sampleLive(out) {
+    const n = out.length;
+    live.analyser.getFloatFrequencyData(live.bins);
+    for (let i = 0; i < n; i++) {
+      const [a, b] = live.edges[i];
+      /* The PEAK bin in the band, not the average — tools/build-envelopes.py
+         does `mag[:, b0:b1].max(axis=1)` and the two paths have to agree or
+         they look like different instruments. Averaging also scales a band's
+         level with its own width: the top band spans ~143 bins against the
+         bottom band's ~2, so a pure tone up there was diluted by ~18 dB and
+         almost exactly cancelled the tilt. Measured, not guessed. */
+      let db = -Infinity;
+      for (let j = a; j < b; j++) if (live.bins[j] > db) db = live.bins[j];
+      if (!isFinite(db)) db = -140;
+      // Same tilt as the offline path so the two look like one instrument.
+      const tilted = db + EQ_TILT * Math.log2(Math.max(eqCentres[i], 40) / 200);
+      const v = (tilted - LIVE_FLOOR) / (LIVE_CEIL - LIVE_FLOOR);
+      out[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+    }
+  }
+
+  async function startLive() {
+    if (liveActive()) return { ok: true };
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,                        // Chrome refuses an audio-only ask
+        audio: { suppressLocalAudioPlayback: false },   // keep hearing it
+        /* Chromium has defaulted selfBrowserSurface to "exclude" since 107,
+           which hides the CAPTURING tab from the picker — so the one tab worth
+           sharing here was the only one not listed. Reported from Edge, which
+           has the same default. preferCurrentTab goes further and asks about
+           this tab directly, skipping the surface picker altogether; both are
+           ignored by browsers that do not know them. */
+        preferCurrentTab: true,
+        selfBrowserSurface: "include",
+      });
+    } catch (e) {
+      // The reader dismissed the picker. Not an error worth shouting about.
+      return { ok: false, error: e && e.name === "NotAllowedError"
+        ? "Sharing was cancelled." : "Could not capture audio." };
+    }
+
+    const audio = stream.getAudioTracks()[0];
+    if (!audio) {
+      stream.getTracks().forEach((t) => t.stop());
+      return { ok: false, error: "That share carried no audio \u2014 turn on \u201cshare tab audio\u201d." };
+    }
+    // The frames are of no use to a spectrum; drop them so the capture is
+    // audio only and the browser stops encoding video.
+    stream.getVideoTracks().forEach((t) => t.stop());
+
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0;      // eqFrame does its own smoothing
+    /* Deliberately NOT connected to ctx.destination: the tab is already
+       playing this audio, and routing it back would double it. */
+    ctx.createMediaStreamSource(stream).connect(analyser);
+
+    live = {
+      stream, ctx, analyser,
+      bins: new Float32Array(analyser.frequencyBinCount),
+      edges: liveEdges(24, ctx.sampleRate, analyser.frequencyBinCount),
+    };
+    // Chrome's own "Stop sharing" ends the track without telling the page.
+    audio.addEventListener("ended", () => stopLive());
+    audio.addEventListener("mute", () => paintLiveBtn());
+
+    paintLiveBtn();
+    setEqTag("live \u00b7 tab audio", true);
+    return { ok: true };
+  }
+
+  function stopLive() {
+    if (!live) return;
+    try { live.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* already gone */ }
+    try { live.ctx.close(); } catch (e) { /* already closed */ }
+    live = null;
+    paintLiveBtn();
+    // Hand the tag back to whatever the envelope path has to say.
+    setEqTag(eqData ? eqData.bands + " bands \u00b7 " + eqData.fps + " fps" : "no envelope", !!eqData);
+  }
+
+  function paintLiveBtn() {
+    const b = $("eqLive");
+    if (!b) return;
+    b.setAttribute("aria-pressed", String(liveActive()));
+    b.textContent = liveActive() ? "live" : "go live";
+    b.title = liveActive()
+      ? "Stop analysing this tab's audio"
+      : "Analyse this tab's audio for a real spectrum. Allow the prompt, with \u201cshare tab audio\u201d on.";
+  }
+
+  /* Wired here rather than with the other controls: `live` and liveActive()
+     are declared just above, and registering earlier put paintLiveBtn() in
+     their temporal dead zone — which threw on load and left the button inert
+     while everything else still worked. */
+  $("eqLive").addEventListener("click", async () => {
+    if (liveActive()) { stopLive(); return; }
+    const btn = $("eqLive");
+    btn.disabled = true;
+    const res = await startLive();
+    btn.disabled = false;
+    if (!res.ok) setEqTag(res.error, false);
+  });
+  paintLiveBtn();
+
   function setEqTag(text, live) {
     const el = $("eqTag");
     el.textContent = text;
@@ -1310,7 +2048,20 @@
         });
         sc.getDuration((ms) => { if (ok(ms) && ms > 0) mediaDuration = ms / 1000; });
       }
+      learnDuration(track, mediaDuration);
     } catch (e) { /* player not ready yet */ }
+  }
+
+  /* oEmbed carries no duration, so an imported track arrives with d: 0 and the
+     "time remaining" readouts under-count it. The player knows, though, so the
+     first play fills it in permanently. Built-in tracks already have a
+     duration from the 2015 dataset and are left alone. */
+  function learnDuration(track, secs) {
+    if (!track || track.d || !imported[track.k]) return;
+    if (!(secs > 0) || contentMismatch) return;      // never learn from an ad
+    setDuration(track.k, Math.round(secs));
+    store.write(K_IMPORT, imported);
+    paintTransportFlanks();
   }
 
   // Player-reported duration when we have it, dataset duration until then.
@@ -1503,13 +2254,19 @@
 
     eqCtx.clearRect(0, 0, eqW, eqH);
 
-    const active = eqData && state.current && state.playing && !contentMismatch;
-    const n = eqData ? eqData.bands : 24;
+    /* Live wins when it is on: it is measuring what is actually coming out,
+       which beats a precomputed guess and is the only thing that works for a
+       track with no envelope. It also ignores contentMismatch — during an ad
+       the live spectrum is simply showing the ad, which is correct. */
+    const useLive = liveActive();
+    const active = useLive || (eqData && state.current && state.playing && !contentMismatch);
+    const n = useLive ? 24 : (eqData ? eqData.bands : 24);
     allocBands(n);
 
     if (active) {
       const target = new Float32Array(n);
-      sampleEnvelope(mediaTime(), target);
+      if (useLive) sampleLive(target);
+      else sampleEnvelope(mediaTime(), target);
       for (let i = 0; i < n; i++) {
         const v = target[i];
         const k = v > eqLevels[i] ? EQ_ATTACK : EQ_RELEASE;
@@ -1843,7 +2600,7 @@
     const filtered = !everyoneSelected();
     $("contribSub").textContent = filtered
       ? `${who.size} of ${ALL_WHO.length} selected  ·  ${state.view.length.toLocaleString()} tracks`
-      : `${ALL_WHO.length} people  ·  ${TRACKS.length.toLocaleString()} tracks`;
+      : `${ALL_WHO.length} people  \u00b7  ${scopeCount().toLocaleString()} tracks`;
     // an action, not a toggle: aria-pressed here would announce a state that
     // contradicts the label, which is the defect already fixed on the mode pill
     $("contribAll").textContent = filtered ? "All" : "None";
@@ -1958,6 +2715,110 @@
     if (!toolsPanel.hidden) { openToolsPanel(false); toolsMore.focus(); }
   });
 
+  // ---------------------------------------------------------- playlist UI
+
+  const plMenu = $("plMenu");
+  const plMore = $("plMore");
+  const plModal = $("plModal");
+
+  function openPlMenu(open, restoreFocus) {
+    plMenu.hidden = !open;
+    plMore.setAttribute("aria-expanded", String(open));
+    $("plCurrent").setAttribute("aria-expanded", String(open));
+    if (!open && restoreFocus) plMore.focus();
+  }
+
+  /* Rebuilt rather than toggled, because the set of playlists changes. The
+     built-in library is always first and can never be deleted. */
+  function paintPlaylist() {
+    $("plCurrent").textContent = currentListName();
+    $("plCurrent").title = `Playlist: ${currentListName()}`;
+    plMenu.innerHTML = "";
+
+    const add = (label, onClick, active, cls) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      // aria-current, matching the list-mode menu — the styling keys off it
+      b.setAttribute("aria-current", String(!!active));
+      if (cls) b.classList.add(cls);
+      b.addEventListener("click", onClick);
+      plMenu.appendChild(b);
+      return b;
+    };
+
+    add("Library", () => { openPlMenu(false); selectPlaylist(null); }, !currentList)
+      .dataset.playlist = "";
+    for (const p of playlists) {
+      add(p.name, () => { openPlMenu(false); selectPlaylist(p.id); }, currentList === p.id)
+        .dataset.playlist = p.id;
+    }
+    add("Add playlist\u2026", () => { openPlMenu(false); openPlModal(); }, false, "pl-add")
+      .dataset.playlist = "new";
+
+    // The pill's width just changed, and the ResizeObserver watches .topbar,
+    // whose size never does — same reason setListMode() calls this.
+    if (typeof reflowTools === "function") reflowTools();
+  }
+
+  let plType = "sheets";
+
+  function setPlType(type) {
+    plType = type;
+    plModal.querySelectorAll("[data-pltype]").forEach((b) =>
+      b.setAttribute("aria-checked", String(b.dataset.pltype === type)));
+    const sheets = type === "sheets";
+    $("plUrl").disabled = !sheets;
+    $("plUrl").placeholder = sheets ? "Sheets link or document ID" : "Not available yet";
+    $("plHint").hidden = !sheets;
+  }
+
+  function openPlModal() {
+    setPlType("sheets");
+    $("plUrl").value = "";
+    setPlStatus("");
+    plModal.showModal();
+  }
+
+  async function runImport() {
+    const go = $("plGo");
+    if (go.disabled) return;
+    const fn = importers[plType];
+    if (!fn) return;
+
+    go.disabled = true;
+    setPlStatus("working\u2026");
+    let res;
+    try { res = await fn($("plUrl").value); }
+    catch (e) { res = { ok: false, error: "Import failed: " + e.message }; }
+    go.disabled = false;
+
+    if (!res || !res.ok) { setPlStatus((res && res.error) || "Import failed.", true); return; }
+
+    setPlStatus(`imported ${res.count} tracks`);
+    paintPlaylist();
+    selectPlaylist(res.id);           // switch to what was just imported
+    plModal.close();
+  }
+
+  $("plCurrent").addEventListener("click", (e) => { e.stopPropagation(); openPlMenu(plMenu.hidden); });
+  plMore.addEventListener("click", (e) => { e.stopPropagation(); openPlMenu(plMenu.hidden); });
+  document.addEventListener("click", (e) => {
+    if (!plMenu.hidden && !e.target.closest(".playlist")) openPlMenu(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !plMenu.hidden) { openPlMenu(false, true); }
+  });
+
+  plModal.querySelectorAll("[data-pltype]").forEach((b) => {
+    b.addEventListener("click", () => setPlType(b.dataset.pltype));
+  });
+  $("plClose").addEventListener("click", () => plModal.close());
+  plModal.addEventListener("click", (e) => { if (e.target === plModal) plModal.close(); });
+  $("plGo").addEventListener("click", runImport);
+  $("plUrl").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); runImport(); }
+  });
+
   const ALL_SKINS = ["jukebox", "night"];
 
   function setSkin(name) {
@@ -2042,13 +2903,14 @@
    * its own floor; past that, whole controls move into a panel behind a "more"
    * button rather than wrapping the bar to a second row.
    *
-   * Collapse order is least-used-first: the theme is set once and left alone,
-   * the list-mode picker is reached for more often, and the search is never
-   * collapsed because it is the only way to reach a specific track in 1,257.
+   * Collapse order is least-used-first: a playlist is chosen once a session at
+   * most, the theme is set once and left alone, the list-mode picker is
+   * reached for more often, and the search is never collapsed because it is
+   * the only way to reach a specific track in 1,257.
    *
    * Every pass starts from fully expanded, so widening the window restores
    * controls to the bar instead of stranding them in the panel. */
-  const COLLAPSE_ORDER = [".skin-switch", ".listmode"];
+  const COLLAPSE_ORDER = [".playlist", ".skin-switch", ".listmode"];
   const toolsEl = document.querySelector(".tools");
   const toolsPanel = $("toolsPanel");
   const toolsMore = $("toolsMore");
@@ -2126,8 +2988,11 @@
 
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea")) return;
-    if (contribModal.open) return;
-    if (!listModeMenu.hidden) return;          // the open picker owns the keys
+    /* Any open dialog owns the keyboard. This used to name contribModal
+       alone, so ArrowLeft/ArrowRight with focus on a non-input control inside
+       the swap, wheel or playlist dialog skipped the track underneath. */
+    if (document.querySelector("dialog[open]")) return;
+    if (!listModeMenu.hidden || !plMenu.hidden) return;   // an open picker owns the keys
     // Space on a focused button must activate that button, not the transport
     if (e.key === " " && e.target.matches("button")) return;
     if (e.key === "ArrowRight") { e.preventDefault(); next(); }
@@ -2137,17 +3002,26 @@
 
   // -------------------------------------------------------------------- go
 
+  booted = true;
+  paintPlaylist();
+  // Picks up where a previous session left off; no-ops when nothing is missing.
+  resolveDurations();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) resolveDurations();      // the loop stops when hidden
+  });
+
   document.documentElement.dataset.skin = prefs.skin;
   document.querySelectorAll("button[data-skin]").forEach((b) =>
     b.setAttribute("aria-pressed", String(b.dataset.skin === prefs.skin)));
   setListMode(state.listMode, { silent: true });
 
-  $("npSub").textContent = TRACKS.length.toLocaleString() + " tracks, posted by friends between 2012 and 2015.";
+  $("npSub").textContent = idleCopy();
   $("statNote").textContent = "liveness learned from playback";
 
   render(true);
   // liveness first: it can reveal dead tracks, which is what makes the
   // replacements sidecar worth asking for at all
+  loadMetaSidecar();
   mergeOfflineLiveness().then(mergeReplacements);
   mergeReplacements();
   loadEqIndex();

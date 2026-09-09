@@ -413,5 +413,231 @@ mut 'the batch claims playback confidence for an oembed verdict' app.js \
   '        markLiveness(t, status, status === "gone" ? 404 : null, "playback");' \
   tests/liveness.spec.js 'records oembed verdicts'
 
+# ---------------------------------------------------------------- playlists
+# Membership is one predicate in buildView(); the counters and the importer's
+# failure modes are the rest of the surface worth breaking.
+
+mut 'the playlist predicate stops filtering' app.js \
+  '      if (playlistKeys) { if (!playlistKeys.has(t.k)) return false; }' \
+  '      if (playlistKeys) { if (false) return false; }' \
+  tests/playlist.spec.js 'becomes a playlist and the view switches'
+
+mut 'the library stops excluding imported tracks' app.js \
+  '      else if (t.imported) return false;' \
+  '      else if (false) return false;' \
+  tests/playlist.spec.js 'imported tracks stay out of the library'
+
+mut 'an unshared sheet is not recognised' app.js \
+  '    if (/^\s*<(?:!doctype|html)/i.test(text)) {' \
+  '    if (false) {' \
+  tests/playlist.spec.js 'permissions problem'
+
+mut 'ids already in the library are fetched again' app.js \
+  '      if (!TRACKS.some((t) => t.k === k) && !imported[k]) fresh.push({ k, i: id });' \
+  '      fresh.push({ k, i: id });' \
+  tests/playlist.spec.js 'reused, not fetched again'
+
+mut 'an imported duration is never written back' app.js \
+  '    if (!track || track.d || !imported[track.k]) return;' \
+  '    if (true) return;' \
+  tests/playlist.spec.js 'learns its duration'
+
+# Not checked: dropping the `!imported[track.k]` clause alone. Every built-in
+# track has a non-zero duration from the 2015 dataset, so `track.d` returns
+# first and the clause is unreachable for them — the mutant turns a no-op into
+# a throw, which no assertion can see. The `track.d` clause below is the part
+# of the guard that has observable behaviour.
+mut 'a learned duration can be revised by a later reading' app.js \
+  '    if (!track || track.d || !imported[track.k]) return;' \
+  '    if (!track || !imported[track.k]) return;' \
+  tests/playlist.spec.js 'learned once and not revised'
+
+mut 'a placeholder import quietly succeeds' app.js \
+  '    paste:  async () => ({ ok: false, error: NOT_BUILT.paste }),' \
+  '    paste:  async () => ({ ok: true, id: null, count: 0, added: 0 }),' \
+  tests/playlist.spec.js 'refuse rather than pretend'
+
+mut 'the counters go back to counting every known track' app.js \
+  '  const scopeCount = () => (playlistKeys ? playlistKeys.size : BUILTIN.length);' \
+  '  const scopeCount = () => TRACKS.length;' \
+  tests/playlist.spec.js 'imported tracks stay out of the library'
+
+mut 'any open dialog stops owning the keyboard' app.js \
+  '    if (document.querySelector("dialog[open]")) return;' \
+  '    if (false) return;' \
+  tests/playlist.spec.js 'arrow keys inside the dialog'
+
+mut 'a missing title is stored as the id' app.js \
+  '        t: "", v: "",' \
+  '        t: item.i, v: "",' \
+  tests/playlist.spec.js 'never lands leaves the track pending'
+
+mut 'a 404 title is not recorded as a dead track' app.js \
+  '          markLiveness(TRACKS.find((x) => x.k === k) || imported[k],' \
+  '          if (false) markLiveness(TRACKS.find((x) => x.k === k) || imported[k],' \
+  tests/playlist.spec.js '404s marks the track dead'
+
+mut 'an unanswered title request is recorded as dead' app.js \
+  '        } else if (res.gone) {' \
+  '        } else if (true) {' \
+  tests/playlist.spec.js 'never lands leaves the track pending'
+
+mut 'rendered rows never ask for their missing titles' app.js \
+  '    backfillRendered();' \
+  '    void 0;' \
+  tests/playlist.spec.js 'beyond the first screen arrive'
+
+# ------------------------------------------------------------ live spectrum
+# The band mapping is the part with real arithmetic in it, so break it in a way
+# that still draws something — a check that only proves "bars appeared" would
+# pass against a wrong mapping.
+
+mut 'the live source is ignored in favour of the envelope' app.js \
+  '    const useLive = liveActive();' \
+  '    const useLive = false;' \
+  tests/liveeq.spec.js 'no envelope'
+
+mut 'band edges are linear in frequency, not logarithmic' app.js \
+  '      const lo = 40 * Math.pow(16000 / 40, i / n);
+      const hi = 40 * Math.pow(16000 / 40, (i + 1) / n);' \
+  '      const lo = 40 + (16000 - 40) * (i / n);
+      const hi = 40 + (16000 - 40) * ((i + 1) / n);' \
+  tests/liveeq.spec.js 'lights the band it belongs in'
+
+mut 'the spectrum tilt is dropped from the live path' app.js \
+  '      const tilted = db + EQ_TILT * Math.log2(Math.max(eqCentres[i], 40) / 200);' \
+  '      const tilted = db;' \
+  tests/liveeq.spec.js 'spectrum is tilted'
+
+# The live path must reduce each band the same way tools/build-envelopes.py
+# does (peak bin, not mean) or the two sources look like different instruments.
+mut 'the live path averages a band instead of taking its peak' app.js \
+  '      let db = -Infinity;
+      for (let j = a; j < b; j++) if (live.bins[j] > db) db = live.bins[j];' \
+  '      let db = 0;
+      for (let j = a; j < b; j++) db += live.bins[j] / (b - a);' \
+  tests/liveeq.spec.js 'spectrum is tilted'
+
+mut 'a share carrying no audio is accepted anyway' app.js \
+  '    if (!audio) {' \
+  '    if (false) {' \
+  tests/liveeq.spec.js 'no audio is reported'
+
+mut 'the screen capture keeps running after live mode stops' app.js \
+  '    try { live.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* already gone */ }' \
+  '    try { void live; } catch (e) { /* already gone */ }' \
+  tests/liveeq.spec.js 'releases the capture'
+
+mut 'the video track is captured and kept' app.js \
+  '    stream.getVideoTracks().forEach((t) => t.stop());' \
+  '    void stream;' \
+  tests/liveeq.spec.js 'video track is dropped'
+
+mut "Chrome's Stop sharing leaves the app thinking it is live" app.js \
+  '    audio.addEventListener("ended", () => stopLive());' \
+  '    void audio;' \
+  tests/liveeq.spec.js 'Stop sharing ends live mode'
+
+mut 'the capturing tab is excluded from its own picker' app.js \
+  '        selfBrowserSurface: "include",' \
+  '        selfBrowserSurface: "exclude",' \
+  tests/liveeq.spec.js 'asks for this tab'
+
+mut 'the capture stops silencing nothing and mutes the tab' app.js \
+  '        audio: { suppressLocalAudioPlayback: false },   // keep hearing it' \
+  '        audio: { suppressLocalAudioPlayback: true },' \
+  tests/liveeq.spec.js 'asks for this tab'
+
+# ------------------------------------------------------ background durations
+
+mut 'the duration resolver plays tracks instead of cueing them' app.js \
+  '      try { durPlayer.cueVideoById(id); } catch (e) { finish({ error: true }); }' \
+  '      try { durPlayer.loadVideoById(id); } catch (e) { finish({ error: true }); }' \
+  tests/playlist.spec.js 'without playing anything'
+
+mut 'the resolver polls getDuration instead of waiting for the cue' app.js \
+  '        onStateChange: (e) => { if (e.data === 5 && durCued) durCued({ ok: true }); },' \
+  '        onStateChange: (e) => { void e; },' \
+  tests/playlist.spec.js 'without playing anything'
+
+mut 'a resolved duration never reaches the row' app.js \
+  '    const row = rowFor(key);
+    if (row) {
+      const cell = row.querySelector(".t-dur");
+      if (cell) cell.textContent = fmtDur(secs);
+    }' \
+  '    void key;' \
+  tests/playlist.spec.js 'without playing anything'
+
+mut 'a refused track is retried forever instead of recorded' app.js \
+  '          durFailed.add(track.k);
+          const status = res.code === 100 ? "gone"' \
+  '          const status = res.code === 100 ? "gone"' \
+  tests/playlist.spec.js 'refuses is recorded'
+
+mut 'resolving does not resume from a previous session' app.js \
+  '  resolveDurations();
+  document.addEventListener("visibilitychange", () => {' \
+  '  document.addEventListener("visibilitychange", () => {' \
+  tests/playlist.spec.js 'picks up where the last session stopped'
+
+mut 'a title still arriving is shown as a bare id' app.js \
+  '      name.textContent = "Resolving \u2014 " + track.i;' \
+  '      name.textContent = track.i;' \
+  tests/playlist.spec.js 'says so instead of showing a bare id'
+
+mut 'resolved durations are held in memory until the run ends' app.js \
+  '        if (++sinceWrite >= 10) { sinceWrite = 0; store.write(K_IMPORT, imported); }' \
+  '        sinceWrite++;' \
+  tests/playlist.spec.js 'saved as they resolve'
+
+# ------------------------------------------------------- metadata sidecar
+
+mut 'the committed sidecar is ignored on import' app.js \
+  "    applyMeta();" \
+  "    void 0;" \
+  tests/playlist.spec.js 'no lookups at all'
+
+mut 'the sidecar never reaches an already-imported playlist' app.js \
+  '    if (applyMeta()) { rebuildLibrary(); render(true); }' \
+  '    void 0;' \
+  tests/playlist.spec.js 'imported before it existed'
+
+# This ordering is the bug that shipped in the first draft: with the check
+# below the short-circuit, an import that pre-filled its fields from the
+# sidecar skipped every embeddable verdict.
+mut 'embeddable is checked after the already-applied short-circuit' app.js \
+  '      if (m.e === false) {
+        markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
+      }
+      if (rec.t === m.t && rec.d === m.d) continue;      // fields already applied' \
+  '      if (rec.t === m.t && rec.d === m.d) continue;
+      if (m.e === false) {
+        markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
+      }' \
+  tests/playlist.spec.js 'applied on every load'
+
+# ----------------------------------------------------------- the resolve API
+
+mut 'the API tier is skipped entirely' app.js \
+  '      const map = await metaFromApi(slice.map((k) => imported[k].i));' \
+  '      const map = null;' \
+  tests/playlist.spec.js 'sparing oEmbed and the cue player'
+
+mut 'an API failure is treated as an empty answer, not a fallback' app.js \
+  '      if (!res.ok) return null;     // 429 quota, 503 no key, 502 upstream — all fall through' \
+  '      if (!res.ok) return {};' \
+  tests/playlist.spec.js 'asked once, not once per batch'
+
+mut 'the API asks one id at a time instead of batching' app.js \
+  '  const META_API_BATCH = 50;        // videos.list maximum; the endpoint enforces it too' \
+  '  const META_API_BATCH = 1;' \
+  tests/playlist.spec.js 'sparing oEmbed and the cue player'
+
+mut 'a configured endpoint is ignored' app.js \
+  '  const META_API = (window.MASH_CONFIG || {}).metaApi || "";' \
+  '  const META_API = "";' \
+  tests/playlist.spec.js "API's verdicts land"
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

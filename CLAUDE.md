@@ -40,10 +40,97 @@ Adding a predicate there reaches the tracklist, the counts, autoplay and the
 wheel at once. Filtering anywhere else will desynchronise them. This is the most
 important convention in the codebase.
 
+## The spectrum
+
+Two sources, and they must agree. `tools/build-envelopes.py` precomputes 24 log
+bands offline; "go live" analyses the tab's own audio through
+`getDisplayMedia` + `AnalyserNode`. Web Audio still cannot reach inside the
+cross-origin iframe — a MediaStream is the way in, and it needs the reader's
+consent, so live mode is opt-in and never starts on its own.
+
+**Reduce each band by its PEAK bin, not its mean.** `build-envelopes.py` does
+`mag[:, b0:b1].max(axis=1)`; the live path must match or the two look like
+different instruments. Averaging also scales a band with its own width — the
+top band is ~143 bins against the bottom band's ~2.
+
+The capture must pass **`selfBrowserSurface: "include"`** and
+`preferCurrentTab: true`. Chromium has excluded the capturing tab from its own
+picker by default since 107, so without these the one tab worth sharing is the
+only one not listed.
+
+Live is the only option for an imported playlist: envelopes exist for 874
+tracks, and 0 of the first 2,007 imported ids had one.
+
+## Playlists
+
+`TRACKS` is **not** a constant: it is the built-in library (`BUILTIN`, what
+`build-tracks.py` shipped) plus whatever playlists have imported, rebuilt by
+`rebuildLibrary()`. Anything derived from the whole library — `ALL_WHO`, the
+contributor panel, the liveness pool — must be recomputed there, not captured
+once at load.
+
+Membership is one predicate in `buildView()`, like every other filter. One
+playlist is visible at a time; the built-in library is the default and shows no
+imported tracks.
+
+Use **`scopeCount()`, not `TRACKS.length`**, for anything the user reads as a
+total. `TRACKS` includes tracks imported by playlists that are not on screen.
+
+Imported titles are fetched **lazily** — the first screenful during the import,
+the rest as their rows render — so a 2,007-id sheet imports as fast as a 20-id
+one. A title that is not known yet is stored as `""` and **never as the id**;
+writing the id into the title field turns a fetch failure into permanent data.
+The import must not use the `mash.livecheck.v1` ledger: that is a budget for
+background politeness, and spending it on a foreground import produced a list
+of 1,900 bare ids.
+
+Metadata resolves in three tiers, each falling through to the next:
+`data/meta.json` → the resolve API (`config.js` → `metaApi`, see
+`server/README.md`) → oEmbed and cueing. **Empty configuration is a supported
+state**, not a broken one: a visitor who deploys nothing still gets a working
+site. Deployment config lives in `config.js`, never in `app.js` — a constant
+there cannot be set by a test and forces an application edit to deploy.
+
+**`data/meta.json` is the keyed shortcut, and the reason no key is needed
+anywhere else.** `tools/resolve-meta.mjs` runs once on whichever machine has a
+YouTube API key — `videos.list`, 50 ids per call, 1 quota unit, returning
+title, channel, duration and `embeddable` together — and its output is
+committed. Every other workstation and every visitor then resolves instantly
+with no key. `localStorage` does not sync between machines and a key does not
+belong in a URL; the results are not secret, so they travel with the repo
+instead. The app consults it before asking YouTube anything, and applies its
+gone/blocked verdicts on **every** load, not only when a title changes.
+
+Everything below is the keyless fallback, used when the sidecar has no entry.
+
+**Durations come from cueing, not playing.** oEmbed has none and `videos.list`
+needs a key, but the IFrame API reports a duration from a CUED video — nothing
+streams, so it is not a view. ~0.5s per track; a 2,000-track sheet resolves in
+about 17 minutes in the background. **Wait for the cue event; never poll
+`getDuration()`** — it returns whatever the player loaded last, which made an
+early measurement report 8s per track and wrong durations. Persist as you go:
+writing only at the end lost 157 resolved durations to one reload.
+
+An oEmbed **404 is a liveness verdict**, not a slow title — one request both
+names the track and settles whether it exists. A request that never lands
+records nothing.
+
+Import is keyless by design: Google Sheets' gviz CSV endpoint and YouTube's
+oEmbed both answer cross-origin with no key. Two traps, both with tests:
+an unshared sheet returns an **HTML sign-in page with a 200**, and oEmbed
+**never returns duration** — imported tracks start at `d: 0` and learn it from
+the player on first play.
+
+**Do not give a new control a class that an existing one uses.** Sharing
+`.listmode`, `.listmode-menu` and `.search` for styling broke
+`COLLAPSE_ORDER`'s `querySelector`, the outside-click handler and two test
+selectors. Give it its own class and extend the CSS selector instead.
+
 State that survives reloads is in `localStorage` under `mash.*`:
 `mash.favs.v1`, `mash.prefs.v1`, `mash.liveness.v1`, `mash.played.v1`,
 `mash.contributors.v1`, `mash.sources.v1`, `mash.wheel.v1`,
-`mash.replacements.v1`.
+`mash.replacements.v1`, `mash.livecheck.v1`, `mash.playlists.v1`,
+`mash.imported.v1`, `mash.playlist.v1`.
 
 Sidecar files in `data/` carry perishable facts so `tracks.js` — a historical
 record — is never rewritten: `liveness.json` (which ids the platforms lost) and
@@ -76,6 +163,11 @@ is our own per-day request ledger, not a reading of anything Google exposes.
 
 The suite exists because nine defects shipped in one unassisted session, several
 of them live. Two rules earned the hard way:
+
+**0. There are two test-only seams**, both because the real event fires inside
+a cross-origin iframe the suite blocks: `mash:completed` (a track finished) and
+`mash:duration` (how long it turned out to be). Do not add a third without the
+same justification.
 
 **1. Never a fixed `waitForTimeout` before a geometry or computed-style
 assertion.** The stage animates its height (QoL 10), the transport buttons
