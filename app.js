@@ -112,7 +112,8 @@
   );
   if (!sources.size) ALL_SOURCES.forEach((x) => sources.add(x));   // same guard as the click path
 
-  const prefs = Object.assign({ skin: "jukebox", listMode: "show" }, store.read(K_PREF, {}));
+  const prefs = Object.assign({ skin: "jukebox", listMode: "show", stagePinned: false },
+                              store.read(K_PREF, {}));
 
   // --------------------------------------------------------------- playlists
 
@@ -3063,35 +3064,142 @@
 
   /* --------------------------------------- collapsing stage (QoL 10)
    *
-   * The stage is sticky under the top bar. Once the list is scrolled, the
-   * video column closes and the now-playing text sits beside the artwork and
-   * spectrum, so the pinned strip stays short enough to leave the list usable.
+   * Two modes. Expanded, the stage scrolls away with the page like any other
+   * content. Once half of it has gone behind the top bar it collapses — the
+   * video column closes, the now-playing text moves beside the spectrum — and
+   * the block pins under the bar in that short form, so what is playing and the
+   * scrubber stay reachable for the rest of the list. Scrolling back up runs the
+   * same sequence backwards at the same point.
    *
-   * Wide hysteresis (collapse above 40, expand at or below 4) because
-   * collapsing shortens the document by ~225px: a narrow band would let that
-   * shortening push the scroll position back across the threshold and flap. */
+   * The peel and the pin are ONE mechanism, not two states to keep in step.
+   * `.pinned` sticks at `--topbar-h` minus `--stage-peel`, so a peel of half the
+   * expanded stage makes sticky engage at exactly the scroll position where the
+   * collapse is due, and a peel of 0 puts the block back under the bar. Nothing
+   * asks whether it has pinned yet; the two cannot disagree.
+   *
+   * Wide viewports only, as asked. Under 860px `.pinned` is static — a pinned
+   * stage on a short viewport eats the list — so there is nothing to peel, and
+   * the old plain threshold with its wide hysteresis band stays exactly as it
+   * was there. */
   const stageEl = document.querySelector(".stage");
-  let stageCollapsed = false;
+  const pinnedEl = document.querySelector(".pinned");
+  /* Mirrors the `max-width: 860px` breakpoint in app.css. There is no way to
+     read a media query's bound back out of a stylesheet, so the two are kept
+     one line apart in the two files and compared by eye. */
+  const WIDE = window.matchMedia("(min-width: 861px)");
+  const NARROW_COLLAPSE_Y = 40;      // the pre-peel threshold, still used narrow
 
-  function stageHeights() {
-    const doc = document.documentElement;
-    return { room: doc.scrollHeight - window.innerHeight, y: window.scrollY };
+  let stageCollapsed = false;
+  /* The pin. Locking is the ABSENCE of the peel: hold --stage-peel at 0 and the
+     block sits under the bar in whatever mode it is already in, and stop
+     updateStageCollapse() touching the class so scrolling cannot change it. No
+     third state and no second code path — the lock reuses the mechanism that
+     was already there.
+
+     Wide only, and so is the lock, not just the button. Under 860px `.pinned` is
+     static and a pin could not hold anything on screen, so app.css hides the
+     control; gating the lock on the same breakpoint is what stops a lock set on
+     a laptop from freezing the mode on a phone with no visible way to undo it. */
+  const pinBtn = $("npPin");
+  let stageLocked = !!prefs.stagePinned;
+  /* Half the EXPANDED stage height, and the collapse threshold. It cannot be
+     read while collapsed — that returns the collapsed height, halves the
+     threshold, and the two states alternate — so measureStage() reads it with
+     the class forced off. */
+  let stagePeel = 0;
+  /* How much the document loses when the stage collapses. Measured, because
+     three different figures for it were written down: a comment saying ~225, a
+     guard using 260, and a test saying ~258. It is 268 at 1440 and it scales
+     with the width, so none of the three was right at every size. */
+  let stageShrink = 0;
+
+  function measureStage() {
+    if (!WIDE.matches) { stagePeel = 0; stageShrink = 0; applyPeel(); return; }
+    const was = stageEl.classList.contains("is-collapsed");
+    /* Both heights, read synchronously with transitions suppressed.
+       getBoundingClientRect() forces layout, so each read is the settled height
+       for the class list at that instant rather than one frame of an animation —
+       which is the whole reason the transition has to go for the duration of the
+       probe. Class list and inline transition are both back where they started
+       before the task ends, so nothing paints in between and the probe itself
+       starts no transition. */
+    stageEl.style.transition = "none";
+    pinnedEl.style.transition = "none";
+    stageEl.classList.remove("is-collapsed");
+    const expanded = stageEl.getBoundingClientRect().height;
+    stageEl.classList.add("is-collapsed");
+    const collapsed = stageEl.getBoundingClientRect().height;
+    stageEl.classList.toggle("is-collapsed", was);
+    void stageEl.getBoundingClientRect();      // settle before transitions return
+    stageEl.style.removeProperty("transition");
+    pinnedEl.style.removeProperty("transition");
+    stagePeel = expanded / 2;
+    stageShrink = expanded - collapsed;
+    applyPeel();
+  }
+
+  /** The peel is live only while expanded, unlocked, and wide. */
+  function applyPeel() {
+    pinnedEl.style.setProperty("--stage-peel",
+      (WIDE.matches && !stageCollapsed && !stageLocked ? stagePeel : 0) + "px");
   }
 
   function updateStageCollapse() {
-    const { room, y } = stageHeights();
-    const want = stageCollapsed ? y > 4 : y > 40;
-    // With a short list — one search result, say — there may not be enough
-    // document left to stay past the threshold once the stage shrinks, and
-    // the two states would alternate on every scroll event.
-    if (want && !stageCollapsed && room < 260) return;
+    /* Locked: the mode is the reader's, not the scroll position's. Returning
+       before anything is read is also what keeps a lock cheap on a scroll
+       handler. */
+    if (stageLocked && WIDE.matches) return;
+    const doc = document.documentElement;
+    const room = doc.scrollHeight - window.innerHeight;
+    const y = window.scrollY;
+    /* Wide: the stage's flow position IS the top bar's bottom edge — it is the
+       first thing under a bar whose height is a constant at every width, see the
+       .topbar comment in app.css — so the amount of it hidden behind that bar is
+       exactly the scroll position, and the trigger is one comparison against
+       half the expanded height. Reading the stage's own rect instead would be
+       wrong the moment the block is stuck, because the rect then reports the
+       pinned position rather than the flow one.
+
+       No hysteresis band on this path. The request was a symmetric trigger, and
+       a single threshold is stable here: collapsing changes neither the scroll
+       position nor the stage's flow offset, and scroll anchoring is off. If
+       parking exactly on the boundary ever reads as jitter, a few pixels of
+       band on the expand side is the fix. */
+    const want = WIDE.matches
+      ? stagePeel > 0 && y >= stagePeel
+      : (stageCollapsed ? y > 4 : y > NARROW_COLLAPSE_Y);
+    /* A short list — one search result, say — may not have enough document left
+       to stay past the threshold once the stage shrinks, and the two states
+       would alternate on every scroll event. The figure is now the shrink
+       itself; 260 remains the fallback for the narrow path, which does not
+       measure. */
+    if (want && !stageCollapsed && room < (stageShrink || 260)) return;
     if (want === stageCollapsed) return;
     stageCollapsed = want;
     stageEl.classList.toggle("is-collapsed", want);
+    applyPeel();
   }
 
   window.addEventListener("scroll", updateStageCollapse, { passive: true });
-  window.addEventListener("resize", updateStageCollapse);
+  /* Re-measure before deciding, both here and on a breakpoint change: the
+     expanded height is a function of the width, so a stale peel puts the
+     threshold in the wrong place. */
+  window.addEventListener("resize", () => { measureStage(); updateStageCollapse(); });
+  WIDE.addEventListener("change", () => { measureStage(); updateStageCollapse(); });
+  pinBtn.setAttribute("aria-pressed", String(stageLocked));
+  pinBtn.addEventListener("click", () => {
+    stageLocked = !stageLocked;
+    prefs.stagePinned = stageLocked;
+    store.write(K_PREF, prefs);
+    pinBtn.setAttribute("aria-pressed", String(stageLocked));
+    applyPeel();
+    /* Unlocking has to catch up with where the scroll already is: it can have
+       run well past the trigger while the stage was held expanded, and without
+       this the stage stays expanded until the next scroll event. */
+    updateStageCollapse();
+  });
+
+  measureStage();
   updateStageCollapse();
 
   /* ------------------------------------------ topbar overflow (QoL 2)

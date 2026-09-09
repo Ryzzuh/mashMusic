@@ -125,7 +125,15 @@
 
     <div class="stage-side">
       <div class="stage-meta">
-        <div class="np-source" id="npSource">—</div>
+        <!-- The pin rides the source line because .np-source is one of only two
+             things that render identically in both stage modes (the title is the
+             other, and it changes size). One control, so there is no second
+             aria-pressed to keep in step with the first. -->
+        <div class="np-head">
+          <div class="np-source" id="npSource">—</div>
+          <button class="np-pin" id="npPin" type="button" aria-pressed="false"
+                  title="Keep the stage on screen and stop it collapsing">pin</button>
+        </div>
         <h1 class="np-title" id="npTitle">Nothing playing</h1>
         <p class="np-sub" id="npSub">1,257 tracks, posted by friends between 2012 and 2015.</p>
         <div class="np-flags" id="npFlags"></div>

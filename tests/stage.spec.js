@@ -21,8 +21,33 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 });
 
-const settle = (page) =>
-  page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+/* Two frames was enough before the block animated its sticky offset. Crossing
+ * the trigger now starts a 300ms `top` transition, so every assertion about
+ * where the block sits would otherwise resolve on how long a CDP round trip
+ * happened to take — measured: the old helper read a top of about -100 on its
+ * way to 59, and the "pinned under the bar" assertion passed anyway because two
+ * evaluates took longer than the transition. Waits for the pinned offset and the
+ * stage height to hold still for two consecutive frames instead. */
+const settle = (page) => page.evaluate(() => new Promise((resolve) => {
+  const pin = document.querySelector(".pinned");
+  const st = document.querySelector(".stage");
+  const read = () => getComputedStyle(pin).top + "|" +
+    st.getBoundingClientRect().height.toFixed(2);
+  let last = null, stable = 0, frames = 0;
+  const step = () => {
+    const now = read();
+    stable = now === last ? stable + 1 : 0;
+    last = now;
+    if (stable >= 2 || ++frames > 60) return resolve();   // ~1s cap
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}));
+
+/** How much of the expanded stage is allowed to leave before anything pins. */
+const peelOf = (page) => page.evaluate(() =>
+  parseFloat(getComputedStyle(document.querySelector(".pinned"))
+    .getPropertyValue("--stage-peel")) || 0);
 
 async function geo(page) {
   return page.evaluate(() => {
@@ -34,6 +59,7 @@ async function geo(page) {
     return {
       collapsed: document.querySelector(".stage").classList.contains("is-collapsed"),
       pinned: r(".pinned"),
+      stage: r(".stage"),
       barBottom: r(".topbar").bottom,
       meta: r(".stage-meta"),
       strip,
@@ -84,13 +110,54 @@ test("the gap from the artwork to the scrubber survives the collapse", async ({ 
     { message: "the collapsed gap never settled" }).toBe(33);
 });
 
-test("the pinned unit never scrolls past the top bar", async ({ page }) => {
-  for (const y of [200, 900, 4000, 12000]) {
+test("the expanded stage scrolls away, and only the collapsed one pins", async ({ page }) => {
+  /* The two modes differ in whether they pin at all. Expanded, the block is
+     ordinary content and leaves with the list; collapsed, it holds under the bar
+     for the rest of the scroll. This asserted only the second half, and every
+     scroll position it used was already past the trigger — so it went on passing
+     when the first half did not exist. */
+  const peel = await peelOf(page);
+  expect(peel, "no peel measured, so nothing below is being tested")
+    .toBeGreaterThan(50);
+
+  // short of the trigger: moved up by exactly the scroll amount, still expanded
+  await page.evaluate(() => window.scrollTo(0, 100));
+  await settle(page);
+  const early = await geo(page);
+  expect(early.collapsed).toBe(false);
+  expect(early.pinned.top).toBeCloseTo(early.barBottom - 100, 0);
+
+  // at it and past it: under the bar, and staying there
+  for (const y of [Math.ceil(peel) + 1, 900, 4000, 12000]) {
     await page.evaluate((v) => window.scrollTo(0, v), y);
     await settle(page);
     const g = await geo(page);
-    expect(Math.abs(g.pinned.top - g.barBottom), `at scrollY ${y}`).toBeLessThan(1.5);
+    expect(g.collapsed, `collapsed at scrollY ${y}`).toBe(true);
+    expect(Math.abs(g.pinned.top - g.barBottom), `pinned at scrollY ${y}`).toBeLessThan(1.5);
   }
+});
+
+test("the trigger is half the expanded stage, and reverses at the same point", async ({ page }) => {
+  const before = await geo(page);
+  const peel = await peelOf(page);
+  /* The peel IS half the expanded stage. That equivalence holds only because the
+     stage sits directly under a bar of constant height, which is what makes the
+     hidden amount equal to the scroll position. */
+  expect(peel).toBeCloseTo(before.stage.height / 2, 0);
+
+  await page.evaluate((v) => window.scrollTo(0, v), Math.floor(peel) - 8);
+  await settle(page);
+  expect((await geo(page)).collapsed, "8px short of the trigger").toBe(false);
+
+  await page.evaluate((v) => window.scrollTo(0, v), Math.ceil(peel) + 8);
+  await settle(page);
+  expect((await geo(page)).collapsed, "8px past it").toBe(true);
+
+  await page.evaluate((v) => window.scrollTo(0, v), Math.floor(peel) - 8);
+  await settle(page);
+  const back = await geo(page);
+  expect(back.collapsed, "reverses at the same point").toBe(false);
+  expect(back.stage.height, "and to the same height").toBeCloseTo(before.stage.height, 0);
 });
 
 test("the scrubber stays on screen and usable while collapsed", async ({ page }) => {
@@ -117,10 +184,135 @@ test("collapsing moves the now-playing text to the left of the spectrum", async 
   expect(Math.abs(after.meta.top - after.strip.top)).toBeLessThan(after.strip.height);
 });
 
+test("the trigger is re-measured after a resize that happens while collapsed", async ({ page }) => {
+  /* The hazard the probe in measureStage() exists for. The expanded height is a
+     function of the width, and it cannot be read while collapsed — that returns
+     the collapsed height, which would put the trigger at about a quarter of
+     where it belongs. Resizing while collapsed is the only way to reach that
+     path, so it is the only way to test it. */
+  const peelBefore = await peelOf(page);
+  await page.evaluate((v) => window.scrollTo(0, v), Math.ceil(peelBefore) + 40);
+  await settle(page);
+  expect((await geo(page)).collapsed, "must be collapsed before the resize").toBe(true);
+
+  await page.setViewportSize({ width: 1400, height: 820 });
+  await settle(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await settle(page);
+
+  const after = await geo(page);
+  const peelAfter = await peelOf(page);
+  expect(after.collapsed).toBe(false);
+  expect(peelAfter, "the peel must track the wider stage")
+    .toBeGreaterThan(peelBefore);
+  expect(peelAfter, "and still be half of it").toBeCloseTo(after.stage.height / 2, 0);
+});
+
+/* ------------------------------------------------------------------ the pin */
+
+const pinColour = (page) => page.evaluate(() =>
+  getComputedStyle(document.querySelector("#npPin")).color);
+
+test("the pin holds the expanded stage under the bar", async ({ page }) => {
+  const peel = await peelOf(page);
+  expect(await isHittable(page, "#npPin")).toMatchObject({ ok: true });
+
+  const off = await pinColour(page);
+  await page.click("#npPin");
+  await settle(page);
+  expect(await page.getAttribute("#npPin", "aria-pressed")).toBe("true");
+  /* The state has to be visible and not merely announced: this control locks
+     the layout, which is a surprising thing to be in without being told. */
+  const on = await pinColour(page);
+  expect(on, "pressed must look different").not.toBe(off);
+  expect(on, "and specifically like an active setting").toBe(
+    await page.evaluate(() => {
+      const el = document.createElement("span");
+      el.style.color = getComputedStyle(document.documentElement)
+        .getPropertyValue("--accent").trim();
+      document.body.appendChild(el);
+      const c = getComputedStyle(el).color;
+      el.remove();
+      return c;
+    }));
+
+  await page.evaluate((v) => window.scrollTo(0, v), Math.ceil(peel) + 400);
+  await settle(page);
+  const g = await geo(page);
+  expect(g.collapsed, "the scroll must not collapse a pinned stage").toBe(false);
+  expect(Math.abs(g.pinned.top - g.barBottom), "and it holds under the bar")
+    .toBeLessThan(1.5);
+});
+
+test("the pin is reachable and holds the collapsed stage too", async ({ page }) => {
+  const peel = await peelOf(page);
+  await page.evaluate((v) => window.scrollTo(0, v), Math.ceil(peel) + 400);
+  await settle(page);
+  expect((await geo(page)).collapsed).toBe(true);
+
+  /* The control has to work in the mode where the stage is 117px tall and the
+     video column is shut, which is the whole reason it lives on the source line
+     rather than anywhere in .stage-media. */
+  expect(await isHittable(page, "#npPin")).toMatchObject({ ok: true });
+  await page.click("#npPin");
+  await settle(page);
+
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await settle(page);
+  expect((await geo(page)).collapsed, "the top must not expand a pinned stage").toBe(true);
+});
+
+test("unpinning catches up with the scroll position", async ({ page }) => {
+  /* Without the explicit re-evaluation on release the stage stays expanded
+     until the reader happens to scroll again, which reads as the button not
+     having worked. */
+  await page.click("#npPin");
+  await settle(page);
+  await page.evaluate(() => window.scrollTo(0, 900));
+  await settle(page);
+  expect((await geo(page)).collapsed).toBe(false);
+
+  await page.click("#npPin");
+  await settle(page);
+  expect((await geo(page)).collapsed, "released, with no further scrolling").toBe(true);
+});
+
+test("the pin survives a reload", async ({ page }) => {
+  await page.click("#npPin");
+  await settle(page);
+  await page.reload();
+  await page.waitForFunction(
+    () => document.querySelector(".stage-media")?.getBoundingClientRect().height > 100);
+  await settle(page);
+
+  expect(await page.getAttribute("#npPin", "aria-pressed")).toBe("true");
+  await page.evaluate(() => window.scrollTo(0, 900));
+  await settle(page);
+  expect((await geo(page)).collapsed, "and still holds after the reload").toBe(false);
+});
+
+test("the pin is not offered, or obeyed, where nothing pins", async ({ page }) => {
+  /* Below 860px `.pinned` is static. A pin there could not hold anything on
+     screen, and a lock carried over from a wider window would freeze the mode
+     with no visible control to undo it. */
+  await page.click("#npPin");
+  await settle(page);
+
+  await page.setViewportSize({ width: 700, height: 820 });
+  await settle(page);
+  expect(await page.isVisible("#npPin"), "hidden where it would be a lie").toBe(false);
+
+  await page.evaluate(() => window.scrollTo(0, 300));
+  await settle(page);
+  expect((await geo(page)).collapsed, "narrow ignores the lock entirely").toBe(true);
+});
+
 test("a list with too little scroll room never collapses", async ({ page }) => {
-  /* Collapsing shortens the document by ~225px, so a list that can only just
-   * be scrolled past the 40px threshold would be pulled back above it and the
-   * two states would alternate on every scroll event.
+  /* Collapsing shortens the document by the stage's own shrink — 259px at this
+   * file's 1100px viewport, and it scales with the width, which is why app.js
+   * measures it rather than carrying a number. A list that can only just be
+   * scrolled past the trigger would be pulled back above it and the two states
+   * would alternate on every scroll event.
    *
    * The first version of this test filtered to three rows, which cannot
    * scroll at all — scrollY stayed 0, so the guard was never reached and
@@ -136,7 +328,12 @@ test("a list with too little scroll room never collapses", async ({ page }) => {
 
   const room = await page.evaluate(() =>
     document.documentElement.scrollHeight - window.innerHeight);
-  expect(room, "must be scrollable past the 40px threshold").toBeGreaterThan(40);
+  /* The window is narrow and both bounds matter. Below the trigger the collapse
+     is never attempted and the guard is never reached — which is the same way
+     the three-row version of this test managed to pass while doing nothing. */
+  const peel = await peelOf(page);
+  expect(room, "must be scrollable past the trigger, or the guard is never reached")
+    .toBeGreaterThan(peel);
   expect(room, "but by less than the collapse would remove").toBeLessThan(260);
 
   /* The end state alone proves nothing: without the guard the flap resolves
@@ -205,6 +402,15 @@ test("the stage does not pin on a narrow viewport", async ({ page }) => {
   await settle(page);
   expect(await page.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+
+  /* The peel is a wide-viewport behaviour and must not follow the class here.
+     A scroll of 100 is short of the wide trigger; narrow keeps the old plain
+     threshold, so it is collapsed well before that, with no peel set. */
+  await page.evaluate(() => window.scrollTo(0, 100));
+  await settle(page);
+  expect(await page.evaluate(() =>
+    document.querySelector(".stage").classList.contains("is-collapsed"))).toBe(true);
+  expect(await peelOf(page)).toBe(0);
 });
 
 test("reduced motion drops the collapse transition", async ({ page }) => {

@@ -61,6 +61,39 @@ only one not listed.
 Live is the only option for an imported playlist: envelopes exist for 874
 tracks, and 0 of the first 2,007 imported ids had one.
 
+## The stage has two modes and one mechanism
+
+Above 860px the expanded stage scrolls away with the page, collapses once half of
+it has gone behind the top bar, and pins under the bar in that short form. The
+sequence reverses at the same point.
+
+**`--stage-peel` is the whole of it, and the contract spans two files.** `.pinned`
+in `app.css` sticks at `top: calc(var(--topbar-h) - var(--stage-peel, 0px))`;
+`app.js` sets that variable to half the measured expanded stage and drops it to 0
+on collapse. Sticky then engages at exactly the scroll position where the
+collapse is due, so there is no "has it pinned yet" state to keep in step with
+the class. 0 is the default, which is the pin-immediately behaviour that came
+before, so a page whose script never runs still works.
+
+**The trigger is `scrollY`, and that is exact rather than lazy.** The stage is the
+first thing under a bar whose height is a constant at every width, so the amount
+of stage hidden behind the bar equals the scroll position. Reading the stage's own
+rect would be wrong the moment the block is stuck, because the rect then reports
+the pinned position and not the flow one.
+
+**The expanded height cannot be read while collapsed.** It returns the collapsed
+height, which puts the trigger at about a quarter of where it belongs, and only a
+resize that happens while collapsed reaches that path. `measureStage()` probes
+both heights synchronously with transitions suppressed, because
+`getBoundingClientRect()` forces layout and would otherwise return a frame of the
+animation.
+
+**The pin button locks the mode by removing the peel**, not by adding a third
+state: hold the variable at 0 and skip the class update. The lock and the button
+are both gated on the same 860px breakpoint, because below it `.pinned` is static
+— a pin could not hold anything on screen, and a lock set on a laptop would
+otherwise freeze the mode on a phone with no visible control to undo it.
+
 ## Playlists
 
 `TRACKS` is **not** a constant: it is the built-in library (`BUILTIN`, what
@@ -251,11 +284,19 @@ a cross-origin iframe the suite blocks: `mash:completed` (a track finished) and
 same justification.
 
 **1. Never a fixed `waitForTimeout` before a geometry or computed-style
-assertion.** The stage animates its height (QoL 10), the transport buttons
-transition, and `.stage-side` is `height: 0; min-height: 100%` so its rows are
-sized from the video box's 16:9 height. Measuring early has produced a 165px gap
-that should be 33, a video column still 596px wide after it "closed", and a list
-525px short of its resting place. Poll for the settled value, or poll the claim.
+assertion.** The stage animates its height and its sticky offset (QoL 10), the
+transport buttons transition, and `.stage-side` is `height: 0; min-height: 100%`
+so its rows are sized from the video box's 16:9 height. Measuring early has
+produced a 165px gap that should be 33, a video column still 596px wide after it
+"closed", and a list 525px short of its resting place. Poll for the settled
+value, or poll the claim.
+
+**Two frames is not "settled" either.** `settle()` in `tests/stage.spec.js` waits
+for the pinned offset and the stage height to hold still across consecutive
+frames. It used to be two `requestAnimationFrame`s, which is ~32ms against a
+300ms transition: the "pinned under the top bar" assertion read a `top` of about
+-100 on its way to 59 and passed anyway, because two CDP round trips took longer
+than the animation. A test that passes on round-trip latency is not passing.
 
 **2. A green test is not evidence until the defect turns it red.**
 `tools/mutate.sh` breaks one line of `app.js` or `app.css` at a time and
