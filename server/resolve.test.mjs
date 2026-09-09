@@ -1,12 +1,12 @@
 /* Handler tests for api/resolve.js — no network, no key, no Vercel.
  *
- *   node server/api/resolve.test.mjs
+ *   node server/resolve.test.mjs
  *
  * Everything here is the input contract: what the endpoint refuses. That
  * matters more than the happy path, because without strict id validation this
  * is an open proxy — anything in `ids` would be forwarded to googleapis.com on
  * the key's behalf. Run by tests/pipeline.spec.js so it cannot rot. */
-const { default: handler } = await import(new URL("./resolve.js", import.meta.url));
+const { default: handler } = await import(new URL("./api/resolve.js", import.meta.url));
 
 function fakeRes() {
   const r = { code: 0, body: null, headers: {}, ended: false };
