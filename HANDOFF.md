@@ -1,206 +1,262 @@
 # HANDOFF
 
-Written 2026-09-07. Task state only — durable project knowledge is in
-`/Users/Rhys/Projects/claude/mashmusic/CLAUDE.md`.
+Written 2026-09-09. Task state only — durable project knowledge is in
+`/Users/Rhys/Projects/claude/mashmusic/CLAUDE.md`, and the reasoning behind
+individual judgement calls is in `DECISIONS.md` (newest first).
 
 ## Current task
 
-Nothing is in flight. The overnight feature spec is complete and every item is
-either built or deliberately dropped. The last change — making the theme palette
-SVG the clickable control — is merged, deployed and verified in production.
+Nothing is in flight. `main` is clean, everything is pushed, no pull request is
+open, and both deployments are serving.
 
-"Done" for the current phase means: `main` is green, deployed, and no branch is
-open. That is the state as of this writing.
+"Done" for the current phase means: playlists can be imported from a Google
+Sheet and resolve their metadata quickly; the spectrum can follow a track that
+has no precomputed envelope. Both are built, deployed and working. What remains
+is listed under Open TODOs, and item 1 is the only thing that has never been
+exercised at all.
 
 ## State
 
-**Finished and live** at https://ryzzuh.github.io/mashMusic/ :
+**Live and verified** at https://ryzzuh.github.io/mashMusic/ :
 
-- All nine milestones of the feature spec (Jukebox 1, 2, 3, 11; QoL 1, 2, 4, 5,
-  6, 7, 8, 10; touchups 1, 2).
-- 188 Playwright tests, 96 mutation checks in `tools/mutate.sh`, all passing.
-- Fonts self-hosted in `assets/fonts/`.
-- SoundCloud spectral envelopes merged into `Ryzzuh/mashMusic-eq` `main` and
-  serving: 241/312 SoundCloud tracks (77%), 633/945 YouTube (66%).
-- `gh` CLI installed at `~/.local/bin/gh` and authenticated as `Ryzzuh`.
+- **Playlists.** The 1,257-track built-in library is the default playlist.
+  Others are imported from a Google Sheets document holding one YouTube id or
+  link per cell. One playlist is visible at a time. Four other import methods
+  (paste a list, YouTube playlist URL, file upload, SoundCloud set) appear in
+  the dialog, are selectable, and report that they are not built yet.
+- **Metadata resolution**, in three tiers, each falling through to the next:
+  `data/meta.json` (committed, does not exist yet), then the resolve API, then
+  YouTube oEmbed for titles plus a hidden cued player for durations.
+- **The resolve API**, deployed at `https://mash-music-meta.vercel.app/api/resolve`
+  and wired up in `/Users/Rhys/Projects/claude/mashmusic/config.js`. Verified
+  live: returns title, channel, duration, thumbnail and `embeddable` for up to
+  50 ids per request, `{gone:true}` for ids YouTube does not know, and
+  `x-vercel-cache: HIT` on repeats.
+- **A live spectrum** ("go live" button on the equalizer panel) that analyses
+  the tab's own audio through `getDisplayMedia` and Web Audio.
+- 192 Playwright tests, 100 mutation checks in `tools/mutate.sh`, all passing.
+- Rollback tag `pre-spec-2026-09-03` exists on both repositories.
 
-**Merged pull requests**, all on `Ryzzuh/mashMusic`: #1 (the overnight spec run),
-#2 (replacements sidecar 404), #3 (self-hosted fonts), #4 (list-mode picker +
-clickable palette), #5 (HIDDEN filters unavailable), #6 (palette becomes the SVG
-control).
+**Merged pull requests**, all on `Ryzzuh/mashMusic`: #1–#7 (earlier work),
+#8 (playlists, live spectrum, offline metadata tool, resolve API), #9 (Vercel
+module type), #10 (accept HEAD), #11 (bulk resolve, test hermeticity). Eleven
+merged branches are still present on the remote; every previously merged branch
+has been kept, so this appears deliberate.
 
-**In progress:** nothing.
+**Untouched / never run:**
 
-**Untouched / not started:**
-
-- The YouTube half of replacement search. `tools/find-replacements.mjs` is
-  written and tested against a stubbed response but **has never been run** — it
-  needs a YouTube Data API key. `data/replacements.json` does not exist.
-
-**Rollback:** both repos carry the tag `pre-spec-2026-09-03`.
-`Ryzzuh/mashMusic` at that tag is commit `537acf6` — the exact build that was
-live before any of this work. `Ryzzuh/mashMusic-eq` at that tag is `e285ec8`,
-the YouTube-only envelope set.
+- `data/meta.json` does not exist. `tools/resolve-meta.mjs` has never made a
+  `videos.list` call from this machine, because there is no `YOUTUBE_API_KEY`
+  here. Its Google Sheets half is verified end to end against a real
+  2,007-track sheet; only the keyed half is unproven locally. The same code
+  path *is* proven through the deployed API.
+- The **live spectrum has never run against a real screen capture.** Every test
+  drives it with a synthetic `MediaStream` built from an oscillator, which
+  exercises the real `AudioContext`, bin-to-band mapping and draw loop but not
+  the browser's capture prompt.
+- `mash.liveness.v1` has never been populated by the in-app batch against the
+  full built-in library.
+- `tools/find-replacements.mjs` has never been run (needs a key, and needs dead
+  tracks to exist first).
 
 ## Decisions made
 
-**`buildView()` is the only place a filter may live.** Search, favourites,
-contributors, sources, played and hidden-unavailable are all predicates in one
-chain. Rationale: each one then reaches the tracklist, the counts, autoplay and
-the wheel for free and cannot desynchronise. Adding a filter elsewhere is the
-single easiest way to break this app.
+**Playlist membership is a single predicate in `buildView()`.** Every other
+filter — favourites, contributors, sources, played, hidden-unavailable — is
+already one line in that chain, so the wheel, autoplay, the counts and the
+transport readouts all follow a playlist switch without knowing playlists
+exist. Filtering anywhere else desynchronises them.
 
-**The equalizer is precomputed, not live.** Web Audio cannot reach inside a
-cross-origin iframe, so the page can never analyse YouTube or SoundCloud audio
-while it plays. `tools/build-envelopes.py` analyses offline and ships 24 log
-bands at 25 fps, 4 bits each (~300 B/s). The page replays it against the
-player's own clock.
+**`TRACKS` is no longer a constant.** It is the built-in library plus whatever
+playlists have imported, rebuilt by `rebuildLibrary()`. Anything derived from
+the whole library — `ALL_WHO`, the contributor panel, the liveness pool — must
+be recomputed there rather than captured once at load.
 
-**Envelopes live in a separate repo** (`Ryzzuh/mashMusic-eq`) because binary
-files do not delta-compress in git; committing a regenerated set into the app
-repo would weld another full copy into its history permanently.
+**Counters use `scopeCount()`, not `TRACKS.length`.** `TRACKS` includes tracks
+imported by a playlist that is not on screen, so the brand count claimed a
+total it was not showing.
 
-**The envelopes are publicly served, knowingly.** The eq repo is private, but
-GitHub Pages serves publicly regardless (access-controlled Pages needs
-Enterprise Cloud), and `index.json` enumerates all 874 ids. A public static site
-cannot fetch private data without exposing it, so the choice was the spectrum
-working for visitors *or* the envelopes not being public. Rhys chose to leave it,
-asked directly. Separately: the *acquisition* used `yt-dlp`, which breaches
-YouTube's terms on downloading; that is unaffected by how the files are served.
+**Google Sheets is read with no key.** The gviz CSV endpoint answers
+cross-origin. An unshared sheet returns an **HTML sign-in page with a 200**, so
+the importer inspects the body and not the status; without that it reports "no
+ids found" for what is really a permissions problem.
 
-**Fonts self-hosted after a measured before/after.** The risk was shifting the
-geometry the suite pins, so advance widths, element boxes and both collapse
-boundaries were measured with Google's files and again with local ones:
-identical to 0.01px, boundaries 685/440 both times. latin + latin-ext only —
-exactly one character in the library falls outside latin.
+**oEmbed never returns duration.** Durations therefore come from cueing:
+`cueVideoById()` puts the official IFrame player in state 5 (CUED) and
+`getDuration()` then answers. Nothing streams, so it is not a view. Measured at
+about 0.5 s per track.
 
-**HIDDEN filters unavailable tracks instead of redacting titles**, at Rhys's
-request. Cost: `hide` used to keep titles out of the DOM entirely, surviving
-devtools and select-all — a real privacy capability, now gone. `OBFUSCATED`
-remains but is cosmetic by design. Note the three modes now sit on two axes
-(SHOWN/OBFUSCATED restyle; HIDDEN filters), so "Track list visibility" no longer
-describes the group.
+**A 404 from oEmbed, and a cue error 100/101/150, are liveness verdicts.** One
+request both names a track and settles whether it exists, so the unavailable
+count, HIDDEN mode and the replacement finder all work off the same round trip.
+A request that never lands records nothing, because no verdict was given.
 
-**The list-mode picker lists all three modes.** It previously listed only the
-two you were not in, so leaving SHOWN removed it from the interface entirely and
-the only way back was a pill whose affordance was a `title` attribute.
+**A missing title is stored as `""` and never as the id.** Writing the id into
+the title field turns a transient fetch failure into permanent data that
+nothing can later distinguish from a track genuinely named that.
 
-**The palette is an `<svg role="button">`, positioned from JS.** The two theme
-labels are content-sized, so the join is not at 50% of the switch and CSS cannot
-ask where one sibling ends. It is 24×20, under WCAG 2.5.8's 24×24, kept under
-the criterion's *Equivalent* exception — both theme buttons are 34px and do the
-same job. The test asserts that exception holds rather than assuming it.
+**The YouTube API key lives in exactly one place, and it is not the browser.**
+`localStorage` does not sync between machines and a key does not belong in a
+URL, so an in-app key field was rejected: it optimises for one machine, adds a
+settings surface for a single-user convenience, and does nothing for visitors.
+Two paths exist instead — `tools/resolve-meta.mjs` writing a committed
+`data/meta.json`, and the deployed resolve API.
 
-**Scroll anchoring is disabled** (`html { overflow-anchor: none }`). The pinned
-stage grows ~258px as the scroll nears the top, which is exactly what anchoring
-compensates for, leaving jump-to-top resting 73px short. Measured: 73 with
-anchoring, 0 without.
+**OAuth would not help, and the intuition that it would is wrong.** YouTube
+quota is charged to the Google Cloud *project*, never to the signed-in user, so
+making visitors sign in would let them read their own data while still spending
+the project owner's 10,000/day. There is no per-user quota in the Data API.
 
-**One test-only seam exists:** `document.addEventListener("mash:completed")`.
-Both players' end events fire inside a cross-origin iframe and the suite blocks
-those hosts, so without it the central rule of the decaying tracklist — *a skip
-is not a listen* — would ship untested.
+**The resolve API's key cannot be IP-restricted.** Google allows exactly one
+application restriction per key. IP addresses need a stable egress address, and
+Vercel functions egress from shared rotating IPs — a fixed one is Static IPs at
+$100/month per project on Pro or Enterprise, with Hobby excluded. HTTP
+referrers are for browser keys and a server sends no `Referer`. The restriction
+that *is* available and does matter is the **API** restriction: limited to
+YouTube Data API v3, a leaked key cannot reach anything else on the project.
+
+**So the endpoint, not the key, is what is protected — by caching first.**
+`s-maxage=86400, stale-while-revalidate=604800`: metadata does not change, so
+an id costs quota once and is then served by the CDN. Strict id validation
+(`[A-Za-z0-9_-]{11}`, at most 50) matters next, because without it the endpoint
+is an open proxy forwarding anything to googleapis.com on the key's behalf.
+CORS pinned to the site's origins stops other websites but not `curl`, and is
+not pretending to. Worst case is a free allowance resetting at midnight
+Pacific, with no billing attached. A shared secret in the frontend was rejected
+as extractable by anyone who can already read the endpoint URL.
+
+**With an endpoint configured, the whole playlist resolves at once.**
+Backfilling per rendered chunk is correct only when a title costs its own
+request; with 50 per call it is pure delay, and it left the cue-based duration
+resolver spending ~17 minutes on durations the same call returns. Per-chunk
+backfill is kept for the no-endpoint case.
+
+**The live spectrum is opt-in and never starts itself.** A page that asks to
+capture your screen unprompted is not one to trust; there is a test asserting
+the app has not called `getDisplayMedia` on its own. The capture passes
+`preferCurrentTab: true` and `selfBrowserSurface: "include"` because Chromium
+has excluded the capturing tab from its own picker by default since version
+107 — without those, the one tab worth sharing is the only one not listed.
+
+**The live spectrum takes each band's peak bin, not its average.**
+`tools/build-envelopes.py` takes the peak, and averaging scales a band by its
+own width — the top band spans ~143 bins against the bottom band's ~2, which
+diluted a pure tone by about 18 dB and almost exactly cancelled the tilt. The
+two sources have to look like one instrument.
+
+**Placeholder import methods are selectable, not disabled.** Disabling them
+made the dispatcher unreachable, so "a placeholder quietly succeeds" could not
+be caught by any test.
 
 ## Dead ends
 
-- **A self-correcting jump-to-top handler** that re-checked the scroll position
-  and snapped it. Written for a 73px resting error later proven to be scroll
-  anchoring. It broke two other tests by fighting their programmatic scrolls.
-  Reverted; `#tTop` is three lines.
-- **Diagnosing the 73px error as machine load.** It was real. The machine
-  genuinely was at load average 209 from concurrent suite runs, which caused
-  *other* spurious failures — but not that one.
-- **Blaming a 165px gap reading on a corrupted working tree.** The corruption
-  was real (a leaked mutation), but was not the cause. The same number returned
-  with a clean tree; it is a layout race.
-- **`brew install gh`.** No bottles on this Intel Ventura machine; it would
-  compile from source without full Xcode. The official precompiled zip works.
-- **Testing canvas animation in the Browser pane.** It suspends
-  `requestAnimationFrame` while hidden, which freezes the clock and the spectrum
-  and looks exactly like a stalled player.
+- **An in-app API key field.** Built as a constant in `app.js`, then rejected
+  entirely. See Decisions. Configuration now lives in `config.js`.
+- **IP-restricting the resolve API's key.** Not possible on a Vercel Hobby
+  plan; see Decisions for the numbers.
+- **Sharing CSS class names between controls.** The playlist picker began as
+  `class="listmode playlist"` to reuse the list-mode styling. That broke
+  `COLLAPSE_ORDER`'s `querySelector(".listmode")`, the outside-click handler,
+  `.listmode-menu button` (5 elements instead of 3) and `.search` (2 instead of
+  1). Shared styling is fine; shared class names are not, when JavaScript and
+  tests select on them.
+- **Polling `getDuration()` after cueing.** It returns whatever the player
+  loaded last, which produced wrong durations and an 8-second-per-track
+  measurement that would have killed the feature. Waiting for the cue event
+  gives ~0.5 s and correct answers.
+- **Gating the duration resolver on `document.hidden`.** Backwards: a
+  17-minute background job should keep going when the tab is not in front.
+- **Persisting resolved durations only at the end of the run.** 157 resolved in
+  memory and every one was lost on reload.
+- **"Scroll to the bottom to pull every chunk through."** Wrong advice.
+  Scrolling loads exactly 60 rows per intersection and each load pushes the
+  bottom further away, so a 2,007-track list needs ~33 separate scrolls.
+- **Sweeping 1600→320px in 8px steps** to derive the top bar's collapse order.
+  160 viewport resizes at two animation frames each overran the 30 s test
+  budget. Three binary searches cost about 30 resizes for the same answer.
 
 ## Key files
 
 | Path | Role |
 |---|---|
-| `app.js` | The whole player. `buildView()` is the filter chain. |
+| `app.js` | The whole player. `buildView()` is the single filter chain. |
+| `config.js` | Deployment configuration — currently just `metaApi`. Edited to deploy; never read by tests. |
 | `app.css` | Two complete theme token sets, `jukebox` and `night`. |
 | `index.html` | Markup, SVG symbol defs, dialogs. |
 | `data/tracks.js` | The 1,257-track library. A historical record; do not rewrite. |
 | `data/liveness.json` | Sidecar: ids the platforms have lost. Currently `{}`. |
-| `assets/fonts/` | Self-hosted Archivo, Barlow, IBM Plex Mono + OFL licence. |
+| `data/meta.json` | Sidecar: committed metadata. **Does not exist yet.** |
+| `server/api/resolve.js` | The Vercel function. Batches 50 ids per `videos.list` call. |
+| `server/resolve.test.mjs` | Handler tests — no network, no key. Beside `api/`, never inside it. |
+| `server/README.md` | Deploy steps, key restrictions, and what actually protects the endpoint. |
+| `tools/resolve-meta.mjs` | Writes `data/meta.json`. Needs a key. Never run. |
+| `tools/check-liveness.mjs` | Offline liveness. Resumable. Needs a key for the YouTube half. |
+| `tools/find-replacements.mjs` | YouTube replacement search. Never run; needs a key. |
+| `tools/build-envelopes.py` | Offline spectral analysis → the `mashMusic-eq` repository. |
 | `tools/mutate.sh` | Mutation harness. Edits app files in place — never run git alongside it. |
-| `tools/build-envelopes.py` | Offline spectral analysis → `mashMusic-eq`. |
-| `tools/find-replacements.mjs` | YouTube replacement search. **Never run; needs an API key.** |
-| `tools/serve.py` | Dev server; no-store, maps `/mashMusic-eq/`. |
-| `tests/helpers.js` | Shared helpers. `isHittable()` is strict; do not add an opt-out. |
-| `tests/playlist.spec.js` | Playlists and the Sheets importer. |
-| `DECISIONS.md` | 54 entries, newest first. Read before relitigating anything. |
-| `legacy/` | The 2015 AngularJS original, preserved. |
-| `PR-BODY.md` | Description used for PR #1. Historical; safe to delete. |
+| `tools/serve.py` | Dev server. Threaded; sends `no-store`; maps `/mashMusic-eq/`. |
+| `tests/helpers.js` | Shared helpers. `blockExternal()` also neutralises `config.js`. |
+| `DECISIONS.md` | Judgement calls with reasoning, newest first. Read before relitigating. |
+| `~/start-mashmusic.sh` | Starts the dev server from a terminal. Outside the repo. |
 
 ## Gotchas
 
-- **A merge to `main` deploys.** Pages builds from `main` on both repos.
-- **Pushing over HTTPS needs** `git config http.postBuffer 524288000`; the 1MB
-  default fails with `RPC failed; HTTP 400`.
-- **Several YouTube ids start with `-`**, so `ls *.bin` treats them as flags.
-  Use `find`.
-- **`tools/find-replacements.mjs` costs 100 quota units per call**
-  (`search.list`) against a 10,000/day default — 100 dead tracks per day, not
-  10,000. It only looks at tracks already known dead, skips solved ones, honours
-  `--limit` and bails on a quota error.
-- **The full suite takes 4–5 minutes; the mutation harness ~25.** Do not run
-  them concurrently.
-- **Playing a YouTube track still contacts Google** from the embed's own iframe
-  (`fonts.gstatic.com`, `jnn-pa.googleapis.com`). The page itself makes zero
-  third-party requests on load.
+- **A merge to `main` deploys.** GitHub Pages builds from `main`.
+- **There are no CI checks on this repository.** The only evidence behind any
+  merge is a local `npx playwright test` run.
+- **The full suite takes 6–12 minutes** depending on machine load, and the
+  mutation harness far longer. Do not run them concurrently, and never run git
+  while `tools/mutate.sh` is running.
+- **`legacy/angular startAgain - backup/jukebox.js:207` contains a hardcoded
+  Google API key**, public since 2026-09-01. Pre-existing and unrelated to
+  recent work. Deleting the line does not help — it is in git history on a
+  public repository. Revoking the key is the only fix.
+- **Vercel builds a preview on every push to this repository**, including
+  pushes that only touch the jukebox. Harmless. `Settings → Git → Ignored
+  Build Step` with `git diff --quiet HEAD^ HEAD -- server` would stop it.
+- **Playlists live in `localStorage`**, so `Cmd+Shift+R` does not clear them —
+  that clears the HTTP cache only. To reset:
+  `["mash.playlists.v1","mash.imported.v1","mash.playlist.v1","mash.liveness.v1"].forEach(k=>localStorage.removeItem(k)); location.reload();`
+- **There is no way to delete a playlist from the interface.** Re-importing the
+  same sheet creates a second entry; the tracks dedupe but the playlist entries
+  stack up.
 
 ## Open TODOs
 
-0. **Deploy `server/` to Vercel** (optional but recommended) — full steps in
-   `server/README.md`. Free key, free Hobby plan. Then set `metaApi` in
-   `config.js`. Note the key **cannot** be IP-restricted: Vercel static IPs
-   are $100/month, Pro/Enterprise only. Set "Application restrictions: None"
-   plus "API restrictions: YouTube Data API v3".
-
-0a. **Or run `tools/resolve-meta.mjs` with a YouTube API key** and commit
-   `data/meta.json`. Free key, no card; 2,007 tracks costs 41 of a
-   10,000/day allowance. This is the one place a key is needed — every other
-   machine and every visitor then resolves titles and durations instantly with
-   no key. The tool has never made a `videos.list` call (no key on this
-   machine); its sheet half and the whole app-side merge are verified.
-
-0b. **Create one public Google Sheet with YouTube ids in it** and import it
-   through the UI. This is the only unproven part of the playlist feature: the
-   Sheets fetch and the oEmbed lookup are each verified against the real
-   services, but their combination is only tested against stubs, because no
-   public sheet containing YouTube ids was available. Share it
-   "anyone with the link can view", then paste the link into
-   Playlist → Add playlist.
-
-1. **Populate liveness for real.** The in-app batch (the `check N of M`
-   control in the status bar) needs no key and can run today — 25 tracks a
-   click, 300 requests a day. Nothing has ever run it against the real
-   library, so `mash.liveness.v1` is empty and no track is known dead.
-2. **Run `tools/check-liveness.mjs`** with a YouTube Data API key to pick up
-   what oEmbed cannot see: videos that exist but have embedding disabled
-   (`v: "api"`, status `blocked`). ~19 quota units for the whole library. It
-   resumes, so it only costs what is still unknown.
-3. **Run `tools/find-replacements.mjs`** once step 1 or 2 has found dead
-   tracks — it only looks at tracks already marked dead, so it does nothing
-   before then. Needs the same key. 100 quota units per dead track.
-4. **Consider renaming the HIDDEN list mode.** It no longer hides titles, and
-   "Track list visibility" no longer describes the group it sits in.
-5. **Delete `PR-BODY.md`** — it was a stopgap for a machine without `gh`, and
-   `gh` is now installed.
-6. **No favicon.** The browser requests `/favicon.ico` on every load and gets a
-   404. Cosmetic only.
+1. **Try the live spectrum against a real capture.** Click "go live" on the
+   equalizer panel in a browser. This is the only feature built recently that
+   has never run outside a synthetic test. Expect a "Share this tab?" prompt.
+   On macOS, Chromium delivers audio only for a **tab** share — a window or
+   whole-screen share yields no audio track, which the app reports rather than
+   failing silently.
+2. **Revoke the exposed legacy Google API key.** See Gotchas.
+3. **Add a way to delete a playlist.** See Gotchas. A control on each entry in
+   the playlist picker, removing the playlist and any imported tracks no other
+   playlist still references.
+4. **Generate `data/meta.json`** by running
+   `YOUTUBE_API_KEY=... node tools/resolve-meta.mjs --sheet <url or id>` and
+   committing the result. Optional now that the resolve API is deployed, but it
+   is the only tier that costs nothing and works offline.
+5. **Populate liveness for the built-in library.** The `check N of M` control
+   in the status bar needs no key: 25 tracks a click, 300 requests a day.
+   `mash.liveness.v1` has never been populated for the 1,257 built-in tracks.
+6. **Run `tools/check-liveness.mjs`** with a key to find videos that exist but
+   have embedding disabled — neither oEmbed nor a cue reports that cleanly for
+   the built-in library. About 19 quota units for the whole library; resumable.
+7. **Run `tools/find-replacements.mjs`** once items 5 or 6 have found dead
+   tracks. It only looks at tracks already marked dead. 100 quota units each.
+8. **Consider renaming the HIDDEN list mode.** It filters unavailable tracks
+   rather than hiding titles, and "Track list visibility" no longer describes
+   the group it sits in.
+9. **Delete `PR-BODY.md`** — a stopgap from before `gh` was installed.
+10. **No favicon.** `/favicon.ico` 404s on every page load. Cosmetic.
 
 ## Next step
 
-Open the site and click the `check N of 1257` control in the status bar a few
-times. That needs no key and is the only way to find out how much of a
-2012-2015 library still resolves — every downstream feature (the unavailable
-count, HIDDEN mode, replacement search) has so far only ever seen dead state
-that a test seeded into `localStorage`.
+Item 1: open https://ryzzuh.github.io/mashMusic/ , play any track, and click
+**go live** on the equalizer panel. Allow the capture prompt with tab audio
+enabled. The tag beside the spectrum should read `live · tab audio` and the
+bars should follow the music. If the prompt does not offer this tab, that is
+the `selfBrowserSurface` behaviour described in Decisions and the deployed code
+already sets both options that address it — so report what the prompt actually
+shows rather than assuming the fix did not land.

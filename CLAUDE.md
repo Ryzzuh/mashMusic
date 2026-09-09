@@ -158,6 +158,31 @@ record — is never rewritten: `liveness.json` (which ids the platforms lost) an
 `replacements.json` (what to play instead; **not generated yet**). Both are
 merged on load and are optional.
 
+## The resolve API (`server/`)
+
+Deployed separately to Vercel with **Root Directory = `server`**, so paths are
+relative to `server/` and `server/api/resolve.js` is served at `/api/resolve`.
+GitHub Pages keeps serving the jukebox from the repo root; the two deployments
+read the same repository and ignore each other's files.
+
+Two rules, both learned by breaking them:
+
+- **Nothing but functions goes in `server/api/`.** Vercel deploys *every* file
+  there as a serverless function, so a test file becomes a public endpoint and,
+  having no handler export, can fail the build — which 404s every route.
+  `server/resolve.test.mjs` sits beside `api/`, never inside it.
+- **`server/package.json` must keep `"type": "module"`.** Without it the
+  runtime may parse `export default` in a `.js` file as CommonJS, which is a
+  syntax error: the module never loads and every request returns
+  `FUNCTION_INVOCATION_FAILED`.
+
+`/` returning 404 on that deployment is **correct** — `server/` has no
+`index.html`. Do not read it as a misconfiguration.
+
+`curl -I` sends HEAD. The handler accepts it, but remember that a method the
+handler rejects returns headers from the error path, which once looked exactly
+like `Cache-Control` failing to apply.
+
 ## Liveness has three writers and one store
 
 `mash.liveness.v1` is written by the players' own error events, by the in-app
@@ -181,6 +206,11 @@ There is no endpoint that reports remaining YouTube quota. `mash.livecheck.v1`
 is our own per-day request ledger, not a reading of anything Google exposes.
 
 ## Testing discipline
+
+**There is no CI on this repository.** Nothing re-runs the suite on GitHub, and
+a merge to `main` deploys immediately. The only evidence behind any merge is a
+local `npx playwright test` run, so run the full suite before merging and say
+plainly in the pull request that this is the only verification there was.
 
 The suite exists because nine defects shipped in one unassisted session, several
 of them live. Two rules earned the hard way:
