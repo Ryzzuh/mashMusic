@@ -747,3 +747,93 @@ test("a failing API is asked once, not once per batch", async ({ page }) => {
   expect(calls.length).toBe(1);
   await expect.poll(() => asked.length).toBe(60);      // and oEmbed covered them all
 });
+
+
+test("with an endpoint the whole playlist resolves, not just the visible rows", async ({ page }) => {
+  /* The reason this exists: backfilling per rendered chunk meant a 2,007-track
+     sheet only resolved as far as you scrolled, while the cue resolver spent
+     ~17 minutes on durations the same API call already returns. */
+  const ids = Array.from({ length: 120 }, (_, i) => "F" + String(i).padStart(4, "0") + "aaaaaa");
+  const table = {};
+  ids.forEach((id, i) => { table[id] = { t: "Title " + id, v: "C", d: 100 + i, a: "", e: true }; });
+
+  await setApi(page);
+  const calls = await stubApi(page, table);
+  await fakeYT(page, {});                       // a cue would hang, proving none is needed
+  await page.reload();
+
+  await stubSheet(page, ids.join("\n"));
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(60);   // one chunk rendered, as always
+
+  // every track resolved, including the 60 never rendered
+  await expect.poll(async () => {
+    const imp = await importedStore(page);
+    return Object.values(imp).filter((v) => v.t && v.d).length;
+  }, { timeout: 20_000 }).toBe(120);
+
+  expect(asked).toEqual([]);                    // oEmbed never needed
+  expect(await page.evaluate(() => window.__yt.cued)).toEqual([]);  // nor cueing
+  expect(calls.length).toBeLessThanOrEqual(4);  // 120 ids in batches of 50
+});
+
+test("without an endpoint it still only resolves what is rendered", async ({ page }) => {
+  /* The per-chunk behaviour is right when each title costs its own request —
+     you pay only for what you look at. */
+  const ids = Array.from({ length: 120 }, (_, i) => "G" + String(i).padStart(4, "0") + "aaaaaa");
+  await fakeYT(page, {});
+  await page.reload();
+  await stubSheet(page, ids.join("\n"));
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(60);
+
+  await expect.poll(() => asked.length, { timeout: 20_000 }).toBe(60);
+  await page.waitForTimeout(500);
+  expect(asked.length).toBe(60);                // and not the other 60
+});
+
+
+test("ids the endpoint cannot answer do not spin the resolver forever", async ({ page }) => {
+  /* The bulk loop asks for whatever is still unresolved. If the endpoint
+     answers 200 but omits an id — a video it knows nothing about — that id is
+     still unresolved on the next pass, and without striking it off the loop
+     asks for it again, and again. */
+  await setApi(page);
+  const calls = await stubApi(page, {
+    AAAAAAAAAAA: { t: "Answered", v: "C", d: 120, a: "", e: true },
+    // BBBBBBBBBBB deliberately absent from the table
+  });
+  await fakeYT(page, {});
+  await page.reload();
+
+  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\n");
+  /* BBBBBBBBBBB must be genuinely unresolvable. A plain oEmbed stub answers
+     everything, which resolved it through the fallback and left the loop with
+     nothing to spin on — the mutation check went MISSED until this aborted
+     instead. An aborted request records no verdict by design, so the id stays
+     unresolved, which is exactly the case that could loop. */
+  await stubOembed(page, { fail: ["BBBBBBBBBBB"] });
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(2);
+  await expect.poll(async () => (await importedStore(page))["YT:AAAAAAAAAAA"].t).toBe("Answered");
+
+  // settle, then confirm it stopped asking rather than looping
+  await page.waitForTimeout(1500);
+  const settled = calls.length;
+  await page.waitForTimeout(1500);
+  expect(calls.length).toBe(settled);
+  expect(settled).toBeLessThan(6);
+});
+
+
+test("the suite is hermetic against whatever config.js is deployed with", async ({ page }) => {
+  /* config.js carries a real endpoint once the site is deployed, and every
+     test inherits it — which is how five specs started calling a live service
+     and failing, because it correctly reported their fake ids as gone.
+
+     blockExternal() also blocks vercel.app, but that is a guess about where
+     the endpoint is hosted. This is the guard that holds wherever it lives. */
+  expect(await page.evaluate(() => window.MASH_CONFIG.metaApi)).toBe("");
+});

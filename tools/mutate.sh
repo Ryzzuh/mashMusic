@@ -639,5 +639,30 @@ mut 'a configured endpoint is ignored' app.js \
   '  const META_API = "";' \
   tests/playlist.spec.js "API's verdicts land"
 
+mut 'the whole playlist is never resolved, only what is rendered' app.js \
+  '    if (!META_API || bulkRunning) return 0;' \
+  '    if (true) return 0;' \
+  tests/playlist.spec.js 'whole playlist resolves'
+
+mut 'unanswerable ids are asked for forever' app.js \
+  '        batch.forEach((k) => { if (!imported[k].t) metaFailed.add(k); });' \
+  '        void batch;' \
+  tests/playlist.spec.js 'do not spin the resolver forever'
+
+mut 'the cue resolver races the API instead of following it' app.js \
+  '    resolveAllMeta().then(resolveDurations);
+  }' \
+  '    resolveDurations();
+  }' \
+  tests/playlist.spec.js 'whole playlist resolves'
+
+# Deployment config must not reach the suite. Without this line every test
+# inherits config.js's real endpoint and calls a live service, which reports
+# the fake ids in those tests as gone — and a dead track will not play.
+mut "deployment config leaks into the test suite" tests/helpers.js \
+  '  await page.addInitScript(() => { window.MASH_CONFIG = { metaApi: "" }; });' \
+  '  void 0;' \
+  tests/playlist.spec.js 'hermetic against whatever config'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi
