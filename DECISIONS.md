@@ -6,6 +6,69 @@ to undo it.
 
 ---
 
+## 2026-09-09 — A resolve API, and why its key cannot be IP-restricted
+
+**Asked for:** put `resolve-meta` behind a Vercel API so the frontend can ask
+for metadata, with the API key restricted to Vercel's IP.
+
+**The restriction is not available, and this was checked rather than assumed.**
+Google allows exactly **one** application restriction per key, and neither
+option fits a serverless function:
+
+- **IP addresses** need a stable egress address. Vercel functions egress from
+  shared, rotating IPs. A fixed one is Static IPs: **$100/month per project,
+  Pro or Enterprise, Hobby excluded outright.**
+- **HTTP referrers** are for browser keys. A server sends no `Referer`, so it
+  would reject every call.
+
+What *is* available and does matter is the **API** restriction — key limited to
+YouTube Data API v3, so a leak cannot reach anything else on the project.
+
+**The security model therefore moves from the key to the endpoint,** and the
+honest framing is that the endpoint is public. Anyone reading the site's source
+finds the URL. Three things make that a non-event, in order of how much they
+actually do:
+
+1. **Caching.** `s-maxage=86400, stale-while-revalidate=604800`. Metadata does
+   not change, so an id costs quota once and is then served by the CDN. This
+   does more than any allowlist would.
+2. **Strict input validation** — `[A-Za-z0-9_-]{11}`, at most 50. Without it
+   the endpoint is an open proxy forwarding anything to googleapis.com on the
+   key's behalf. This is the bulk of what its tests cover.
+3. **CORS pinned to the site's origins.** Stops other websites; does not stop
+   `curl`, and does not pretend to.
+
+Worst case is a free 10,000/day allowance resetting at midnight Pacific, with
+no billing attached. A shared secret in the frontend was considered and
+rejected: it is extractable by anyone who can already read the endpoint URL.
+
+**Three tiers, each falling through:** `data/meta.json` (committed, free,
+offline) → the API (keyed, batched, cached) → oEmbed and cueing (keyless).
+**Empty configuration is a supported state**, not a broken one — a visitor who
+never deploys anything still gets a working site, and there is a test asserting
+the keyless path is untouched.
+
+**Configuration moved out of `app.js` into `config.js`.** It began as a
+constant, which meant tests could not set it and Rhys would have had to edit
+application code to deploy. `config.js` is a plain script like `data/tracks.js`
+— so it works from `file://` — and it does not overwrite an existing value,
+which is what lets a test set one before the page loads.
+
+**A mutation the tests could not see, and what it taught.** Returning `{}`
+instead of `null` from a failed API call still falls through to oEmbed, so
+"falls back" could not detect it. The real property is different: `null`
+**stops asking an endpoint already known to be down**. With one batch there is
+no difference; with two there is. The test now imports 60 ids and asserts the
+failing endpoint was called once, not twice.
+
+**A flaw in a test of mine, worth recording because it looked fine.** The
+"at most 50 ids" check appeared broken until the test was read: it generated
+ids as `"a".repeat(10) + (i % 10)`, which is only ten distinct values, and the
+handler's `Set` deduped 51 down to 10 before the count was ever checked. The
+handler was right; the test was asking the wrong question.
+
+---
+
 ## 2026-09-09 — A committed metadata sidecar, so the key lives in one place
 
 **The question that settled the design:** "how do I access the optional key

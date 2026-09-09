@@ -617,5 +617,27 @@ mut 'embeddable is checked after the already-applied short-circuit' app.js \
       }' \
   tests/playlist.spec.js 'applied on every load'
 
+# ----------------------------------------------------------- the resolve API
+
+mut 'the API tier is skipped entirely' app.js \
+  '      const map = await metaFromApi(slice.map((k) => imported[k].i));' \
+  '      const map = null;' \
+  tests/playlist.spec.js 'sparing oEmbed and the cue player'
+
+mut 'an API failure is treated as an empty answer, not a fallback' app.js \
+  '      if (!res.ok) return null;     // 429 quota, 503 no key, 502 upstream — all fall through' \
+  '      if (!res.ok) return {};' \
+  tests/playlist.spec.js 'asked once, not once per batch'
+
+mut 'the API asks one id at a time instead of batching' app.js \
+  '  const META_API_BATCH = 50;        // videos.list maximum; the endpoint enforces it too' \
+  '  const META_API_BATCH = 1;' \
+  tests/playlist.spec.js 'sparing oEmbed and the cue player'
+
+mut 'a configured endpoint is ignored' app.js \
+  '  const META_API = (window.MASH_CONFIG || {}).metaApi || "";' \
+  '  const META_API = "";' \
+  tests/playlist.spec.js "API's verdicts land"
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

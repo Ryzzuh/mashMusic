@@ -18,7 +18,7 @@ open. That is the state as of this writing.
 
 - All nine milestones of the feature spec (Jukebox 1, 2, 3, 11; QoL 1, 2, 4, 5,
   6, 7, 8, 10; touchups 1, 2).
-- 182 Playwright tests, 92 mutation checks in `tools/mutate.sh`, all passing.
+- 188 Playwright tests, 96 mutation checks in `tools/mutate.sh`, all passing.
 - Fonts self-hosted in `assets/fonts/`.
 - SoundCloud spectral envelopes merged into `Ryzzuh/mashMusic-eq` `main` and
   serving: 241/312 SoundCloud tracks (77%), 633/945 YouTube (66%).
@@ -158,7 +158,13 @@ is not a listen* — would ship untested.
 
 ## Open TODOs
 
-0. **Run `tools/resolve-meta.mjs` with a YouTube API key** and commit
+0. **Deploy `server/` to Vercel** (optional but recommended) — full steps in
+   `server/README.md`. Free key, free Hobby plan. Then set `metaApi` in
+   `config.js`. Note the key **cannot** be IP-restricted: Vercel static IPs
+   are $100/month, Pro/Enterprise only. Set "Application restrictions: None"
+   plus "API restrictions: YouTube Data API v3".
+
+0a. **Or run `tools/resolve-meta.mjs` with a YouTube API key** and commit
    `data/meta.json`. Free key, no card; 2,007 tracks costs 41 of a
    10,000/day allowance. This is the one place a key is needed — every other
    machine and every visitor then resolves titles and durations instantly with

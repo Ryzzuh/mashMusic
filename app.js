@@ -815,6 +815,31 @@
     return n;
   }
 
+  /* The resolve API — the middle tier.
+   *
+   *   data/meta.json   committed, free, offline, zero requests
+   *   META_API         keyed, batched, cached; for ids the sidecar lacks
+   *   oEmbed + cueing  when neither is available
+   *
+   * Set META_API to a deployed server/api/resolve.js (see server/README.md).
+   * Empty means the tier is skipped entirely, which is the default: the app
+   * must keep working for anyone who never deploys one. */
+  const META_API = (window.MASH_CONFIG || {}).metaApi || "";
+  const META_API_BATCH = 50;        // videos.list maximum; the endpoint enforces it too
+
+  /** Ask the API about up to 50 ids. Resolves to a meta map, or null. */
+  async function metaFromApi(ids) {
+    if (!META_API || !ids.length) return null;
+    try {
+      const res = await fetch(META_API + "?ids=" + encodeURIComponent(ids.join(",")),
+        { mode: "cors" });
+      if (!res.ok) return null;     // 429 quota, 503 no key, 502 upstream — all fall through
+      return await res.json();
+    } catch (e) {
+      return null;                  // not deployed, offline, blocked — same answer
+    }
+  }
+
   /* Metadata backfill.
    *
    * A sheet can be any size — the one this was built against holds 2,007 ids —
@@ -835,10 +860,27 @@
     if (!want.length) return 0;
     want.forEach((k) => metaPending.add(k));
 
+    /* One request per 50 ids, and it carries duration and embeddable too — so
+       a hit here also spares the cue-based duration resolver. oEmbed below is
+       one request per track and knows neither. */
+    let viaApi = 0;
+    for (let i = 0; i < want.length && META_API; i += META_API_BATCH) {
+      const slice = want.slice(i, i + META_API_BATCH);
+      const map = await metaFromApi(slice.map((k) => imported[k].i));
+      if (!map) break;                        // unavailable: stop asking, use oEmbed
+      Object.assign(metaSidecar, map);
+      viaApi += applyMeta();
+      slice.forEach((k) => { if (imported[k].t) metaPending.delete(k); });
+      if (onProgress) onProgress(viaApi);
+    }
+
+    const left = want.filter((k) => imported[k] && !imported[k].t);
+    if (!left.length) { store.write(K_IMPORT, imported); return viaApi; }
+
     let done = 0, cursor = 0;
     async function worker() {
-      while (cursor < want.length) {
-        const k = want[cursor++];
+      while (cursor < left.length) {
+        const k = left[cursor++];
         const rec = imported[k];
         const res = await ytMeta(rec.i);
         if (res.meta) {
@@ -872,10 +914,10 @@
       }
     }
     metaRunning++;
-    await Promise.all(Array.from({ length: Math.min(4, want.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(4, left.length) }, worker));
     metaRunning--;
     store.write(K_IMPORT, imported);
-    return done;
+    return done + viaApi;
   }
 
   /** Update one already-rendered row in place, without rebuilding the list. */

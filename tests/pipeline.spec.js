@@ -74,3 +74,16 @@ print("MONOTONIC" if all(centres[i] < centres[i+1] for i in range(len(centres)-1
   expect(out).toMatch(/FULLSCALE 15\b/);
   expect(out).toContain("MONOTONIC");        // no two bands sharing a centre
 });
+
+
+test("the resolve endpoint refuses everything it should", () => {
+  /* Run rather than reimplemented here: api/resolve.js is a Node handler, not
+     page code, so its own test runs it directly with fake req/res. The checks
+     that matter are the refusals — without strict id validation the endpoint
+     is an open proxy that forwards anything to googleapis.com on the key's
+     behalf. */
+  const out = execFileSync("node", ["server/api/resolve.test.mjs"],
+    { cwd: ROOT, encoding: "utf8", timeout: 30_000 });
+  expect(out).toContain("ALL PASS");
+  expect(out).not.toContain("FAIL");
+});

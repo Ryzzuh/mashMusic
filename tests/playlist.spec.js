@@ -629,3 +629,121 @@ test("the sidecar's verdicts are applied on every load, not only when fields cha
   }).toBe("blocked");
   await expect(page.locator("#statDead")).toHaveText("1 unavailable");
 });
+
+
+/* ---------------------------------------------------------- the resolve API */
+
+/** Configure a resolve endpoint before the page loads. config.js keeps any
+ *  value already set, which is what makes this possible. */
+const setApi = (page) =>
+  page.addInitScript(() => { window.MASH_CONFIG = { metaApi: "https://stub.test/api/resolve" }; });
+
+/** Answer that endpoint the way server/api/resolve.js would. */
+async function stubApi(page, table, opts = {}) {
+  const calls = [];
+  await page.route("**/stub.test/api/resolve*", async (route) => {
+    const ids = new URL(route.request().url()).searchParams.get("ids").split(",");
+    calls.push(ids);
+    if (opts.status && opts.status !== 200) {
+      return route.fulfill({ status: opts.status, contentType: "application/json",
+                             body: JSON.stringify({ error: "nope" }) });
+    }
+    const out = {};
+    for (const id of ids) if (table[id]) out["YT:" + id] = table[id];
+    await route.fulfill({ status: 200, contentType: "application/json",
+                          body: JSON.stringify(out) });
+  });
+  return calls;
+}
+
+test("the API tier resolves a batch, sparing oEmbed and the cue player", async ({ page }) => {
+  await setApi(page);
+  const calls = await stubApi(page, {
+    AAAAAAAAAAA: { t: "API Title A", v: "Chan", d: 253, a: "", e: true },
+    BBBBBBBBBBB: { t: "API Title B", v: "Chan", d: 411, a: "", e: true },
+  });
+  await fakeYT(page, {});                       // a cue would hang, proving none happens
+  await page.reload();
+
+  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\n");
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(2);
+
+  await expect(page.locator(".trow").first()).toContainText("API Title A");
+  await expect(page.locator('.trow[data-key="YT:AAAAAAAAAAA"] .t-dur')).toHaveText("4:13");
+  expect(asked).toEqual([]);                    // oEmbed untouched
+  expect(await page.evaluate(() => window.__yt.cued)).toEqual([]);
+  expect(calls.length).toBe(1);                 // one request for both ids
+});
+
+test("the API falls back to oEmbed when it cannot answer", async ({ page }) => {
+  /* 429 is quota, 503 is a missing key, 502 is upstream trouble. None of them
+     should break an import — the keyless path is still there. */
+  await setApi(page);
+  await stubApi(page, {}, { status: 429 });
+  await fakeYT(page, { AAAAAAAAAAA: 180 });
+  await page.reload();
+
+  await stubSheet(page, "AAAAAAAAAAA\n");
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(1);
+
+  await expect(page.locator(".trow").first()).toContainText("Title AAAAAAAAAAA");
+  expect(asked).toEqual(["AAAAAAAAAAA"]);       // oEmbed picked it up
+  await expect.poll(async () => (await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(180);
+});
+
+test("the API's verdicts land like the sidecar's", async ({ page }) => {
+  await setApi(page);
+  await stubApi(page, {
+    AAAAAAAAAAA: { t: "Fine", v: "C", d: 100, a: "", e: true },
+    BBBBBBBBBBB: { t: "No embedding", v: "C", d: 200, a: "", e: false },
+    CCCCCCCCCCC: { gone: true },
+  });
+  await fakeYT(page, {});
+  await page.reload();
+  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\nCCCCCCCCCCC\n");
+  await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(3);
+
+  await expect.poll(async () => {
+    const l = await page.evaluate(() => JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
+    return l["YT:BBBBBBBBBBB"]?.s;
+  }).toBe("blocked");
+  await expect(page.locator("#statDead")).toHaveText("2 unavailable");
+});
+
+test("no API configured keeps the keyless path exactly as it was", async ({ page }) => {
+  await fakeYT(page, { AAAAAAAAAAA: 195 });
+  await page.reload();
+  await stubSheet(page, "AAAAAAAAAAA\n");
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(1);
+  expect(asked).toEqual(["AAAAAAAAAAA"]);
+  await expect.poll(async () => (await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(195);
+});
+
+
+test("a failing API is asked once, not once per batch", async ({ page }) => {
+  /* Falling back is not enough: an endpoint that just returned 429 will return
+     429 for the next batch too, and asking anyway is a burst of pointless
+     requests at something already known to be down. */
+  await setApi(page);
+  const calls = await stubApi(page, {}, { status: 429 });
+  const ids = Array.from({ length: 60 }, (_, i) => "E" + String(i).padStart(4, "0") + "aaaaaa");
+  await fakeYT(page, {});
+  await page.reload();
+
+  await stubSheet(page, ids.join("\n"));
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(60);
+
+  // 60 ids is two batches of 50 and 10; the second must never be attempted
+  expect(calls.length).toBe(1);
+  await expect.poll(() => asked.length).toBe(60);      // and oEmbed covered them all
+});

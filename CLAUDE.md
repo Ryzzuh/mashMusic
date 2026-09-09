@@ -84,6 +84,13 @@ The import must not use the `mash.livecheck.v1` ledger: that is a budget for
 background politeness, and spending it on a foreground import produced a list
 of 1,900 bare ids.
 
+Metadata resolves in three tiers, each falling through to the next:
+`data/meta.json` → the resolve API (`config.js` → `metaApi`, see
+`server/README.md`) → oEmbed and cueing. **Empty configuration is a supported
+state**, not a broken one: a visitor who deploys nothing still gets a working
+site. Deployment config lives in `config.js`, never in `app.js` — a constant
+there cannot be set by a test and forces an application edit to deploy.
+
 **`data/meta.json` is the keyed shortcut, and the reason no key is needed
 anywhere else.** `tools/resolve-meta.mjs` runs once on whichever machine has a
 YouTube API key — `videos.list`, 50 ids per call, 1 quota unit, returning
