@@ -44,11 +44,19 @@ export default async function handler(req, res) {
     res.setHeader("Vary", "Origin");
   }
   if (req.method === "OPTIONS") {
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     res.setHeader("Access-Control-Max-Age", "86400");
     return res.status(204).end();
   }
-  if (req.method !== "GET") return res.status(405).json({ error: "GET only" });
+  /* HEAD is allowed, not just GET. It is a safe method that caches and health
+     checks use, and rejecting it is both wrong and actively misleading: `curl
+     -I` sends HEAD, so every header inspection of this endpoint was reading
+     the 405 rather than the real response — which looked exactly like the
+     Cache-Control header not being applied. Node drops the body for HEAD on
+     its own. */
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return res.status(405).json({ error: "GET only" });
+  }
 
   const raw = (req.query.ids || "").toString();
   const ids = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];

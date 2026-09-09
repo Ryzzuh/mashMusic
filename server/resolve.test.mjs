@@ -37,6 +37,10 @@ t("50 ids ok past validation", (await call({ ids: uniq(50).join(",") })).code, 5
 t("duplicates collapse below the cap", (await call({ ids: Array(60).fill("dQw4w9WgXcQ").join(",") })).code, 503);
 t("valid id, no key -> 503", (await call({ ids: "dQw4w9WgXcQ" })).code, 503);
 t("POST -> 405", (await call({ ids: "dQw4w9WgXcQ" }, { method: "POST" })).code, 405);
+t("DELETE -> 405", (await call({ ids: "dQw4w9WgXcQ" }, { method: "DELETE" })).code, 405);
+// HEAD must behave as GET: curl -I uses it, and so do caches
+t("HEAD reaches the handler", (await call({ ids: "dQw4w9WgXcQ" }, { method: "HEAD" })).code, 503);
+t("HEAD with junk still refused", (await call({ ids: "nope" }, { method: "HEAD" })).code, 400);
 
 // CORS
 const allowed = await call({ ids: "dQw4w9WgXcQ" }, { origin: "https://ryzzuh.github.io" });
