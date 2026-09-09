@@ -37,6 +37,18 @@ exercised at all.
   `x-vercel-cache: HIT` on repeats.
 - **A live spectrum** ("go live" button on the equalizer panel) that analyses
   the tab's own audio through `getDisplayMedia` and Web Audio.
+- **A stage that peels before it pins**, on viewports above 860px. The expanded
+  stage scrolls away with the page; once half of it has gone behind the top bar
+  it collapses and the block pins in that short form, and the sequence reverses
+  at the same point. The peel and the pin are one mechanism: `.pinned` sticks at
+  `--topbar-h` minus `--stage-peel`, which `app.js` sets to half the measured
+  expanded height and drops to 0 on collapse. Narrow viewports keep the old
+  plain threshold untouched. Not yet exercised by hand in a real browser.
+- **A pin on the now-playing source line**, in both stage modes, which locks the
+  current mode and holds the block under the top bar. Locking is the absence of
+  the peel: the variable is held at 0 and the scroll handler returns early. Both
+  the control and the lock are gated on the same 860px breakpoint. Persisted as
+  `stagePinned` in `mash.prefs.v1`.
 - 192 Playwright tests, 100 mutation checks in `tools/mutate.sh`, all passing.
 - Rollback tag `pre-spec-2026-09-03` exists on both repositories.
 

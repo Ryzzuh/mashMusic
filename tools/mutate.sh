@@ -693,5 +693,89 @@ mut 'a capped run marks its waiting tracks failed' app.js \
       left.forEach((k) => metaPending.delete(k));' \
   tests/playlist.spec.js 'reported as waiting'
 
+# ------------------------------------------------- the peeling stage (QoL 10b)
+#
+# Expanded, the stage scrolls away with the page; it collapses and pins once half
+# of it has gone behind the top bar. The peel and the pin are one mechanism — a
+# sticky offset of --topbar-h minus --stage-peel — so most of these break the
+# variable rather than any branch.
+
+mut 'the stage pins immediately instead of scrolling away' app.js \
+  '    pinnedEl.style.setProperty("--stage-peel",
+      (WIDE.matches && !stageCollapsed ? stagePeel : 0) + "px");' \
+  '    pinnedEl.style.setProperty("--stage-peel", "0px");' \
+  tests/stage.spec.js 'only the collapsed one pins'
+
+mut 'the collapsed stage never comes back under the bar' app.js \
+  '    stageEl.classList.toggle("is-collapsed", want);
+    applyPeel();' \
+  '    stageEl.classList.toggle("is-collapsed", want);' \
+  tests/stage.spec.js 'only the collapsed one pins'
+
+mut 'the trigger is a fixed scroll distance, not half the stage' app.js \
+  '      ? stagePeel > 0 && y >= stagePeel' \
+  '      ? y > NARROW_COLLAPSE_Y' \
+  tests/stage.spec.js 'half the expanded stage'
+
+mut 'the peel follows the class onto narrow viewports' app.js \
+  '    const want = WIDE.matches
+      ? stagePeel > 0 && y >= stagePeel
+      : (stageCollapsed ? y > 4 : y > NARROW_COLLAPSE_Y);' \
+  '    const want = stagePeel > 0 && y >= stagePeel;' \
+  tests/stage.spec.js 'does not pin on a narrow viewport'
+
+# Reading the expanded height while collapsed returns the collapsed one, which
+# puts the trigger at roughly a quarter of where it belongs. Only a resize that
+# happens while collapsed reaches it.
+mut 'the expanded height is measured while collapsed' app.js \
+  '    stageEl.classList.remove("is-collapsed");
+    const expanded = stageEl.getBoundingClientRect().height;' \
+  '    const expanded = stageEl.getBoundingClientRect().height;' \
+  tests/stage.spec.js 'resize that happens while collapsed'
+
+# ------------------------------------------------------------------- the pin
+#
+# Locking is the absence of the peel, so most of these break the same variable
+# from a different direction.
+
+mut 'the lock is ignored and scrolling still decides the mode' app.js \
+  '    if (stageLocked && WIDE.matches) return;' \
+  '    if (false) return;' \
+  tests/stage.spec.js 'holds the expanded stage under the bar'
+
+mut 'a pinned stage still peels away' app.js \
+  '      (WIDE.matches && !stageCollapsed && !stageLocked ? stagePeel : 0) + "px");' \
+  '      (WIDE.matches && !stageCollapsed ? stagePeel : 0) + "px");' \
+  tests/stage.spec.js 'holds the expanded stage under the bar'
+
+mut 'the lock follows onto viewports where nothing pins' app.js \
+  '    if (stageLocked && WIDE.matches) return;' \
+  '    if (stageLocked) return;' \
+  tests/stage.spec.js 'not offered, or obeyed'
+
+mut 'releasing the pin waits for the next scroll' app.js \
+  '    applyPeel();
+    /* Unlocking has to catch up with where the scroll already is: it can have
+       run well past the trigger while the stage was held expanded, and without
+       this the stage stays expanded until the next scroll event. */
+    updateStageCollapse();
+  });' \
+  '    applyPeel();
+  });' \
+  tests/stage.spec.js 'catches up with the scroll position'
+
+mut 'a pinned stage looks exactly like an unpinned one' app.css \
+  '.np-pin[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }' \
+  '.np-pin[aria-pressed="true"] { border-color: var(--accent); }' \
+  tests/stage.spec.js 'holds the expanded stage under the bar'
+
+mut 'the pin is forgotten on reload' app.js \
+  '    stageLocked = !stageLocked;
+    prefs.stagePinned = stageLocked;
+    store.write(K_PREF, prefs);' \
+  '    stageLocked = !stageLocked;
+    prefs.stagePinned = stageLocked;' \
+  tests/stage.spec.js 'survives a reload'
+
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

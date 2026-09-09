@@ -633,13 +633,56 @@ main {
   overflow: hidden;
 }
 
+/* Source line and pin on one row. The pin is pushed to the far end rather than
+   sitting next to the text, so it holds the same corner whether the source line
+   reads "YOUTUBE" or nothing at all. */
+.np-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .np-source {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 10.5px;
   letter-spacing: .14em;
   text-transform: uppercase;
   color: var(--ink-3);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
+/* Locks the stage in whichever mode it is in and holds it under the top bar.
+   A pill, not an icon: this began as a 15px pushpin glyph, which at that size
+   read as a stray cursor arrow and, right-aligned across an 840px row with an
+   idle source line beside it, read as a stray mark rather than a control.
+
+   The declarations are .eq-live's, deliberately duplicated rather than shared.
+   Sharing STYLING between the two in-stage toggles is right; sharing a class
+   NAME is what broke four selectors when the playlist picker borrowed
+   .listmode, so each control keeps its own hook. Pressed is --accent, an active
+   setting, and not the --ok .eq-live uses for a capture genuinely on air. */
+.np-pin {
+  margin-left: auto;
+  flex: none;
+  appearance: none;
+  padding: 3px 8px;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--ink-3);
+  cursor: pointer;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  transition: color .15s var(--ease), border-color .15s var(--ease);
+}
+.np-pin:hover { color: var(--ink); border-color: var(--ink-3); }
+.np-pin[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 
 .np-title {
   margin: 0;
@@ -1500,10 +1543,30 @@ main {
      pinning the stage over it would have put the play, next and jump controls
      behind the stage the moment the list scrolled — and milestone 4 aligned
      its flanks to the tracklist's own columns, which only reads correctly
-     while the two are adjacent. */
+     while the two are adjacent. One wrapper is also why the scrubber and the
+     transport peel away with the expanded stage rather than staying put:
+     splitting them would give the scrubber back for those first ~190px and
+     cost the 33px gap, which is ordinary flow spacing only while they are
+     siblings. */
   position: sticky;
-  top: var(--topbar-h);
+  /* The peel, and the whole of it. --stage-peel is how much of the expanded
+     stage is allowed to leave the screen before anything pins: app.js sets it
+     to half the measured expanded height and drops it to 0 the instant the
+     stage collapses. Sticky then engages at exactly the scroll position where
+     the collapse is due, and returns the block to the bar when it is not, so
+     "has it pinned yet" is never a state anyone has to track.
+
+     0 by default, which is the behaviour that was here before — the block pins
+     immediately — so a page whose script never runs still works. */
+  top: calc(var(--topbar-h) - var(--stage-peel, 0px));
   z-index: 20;
+  /* The stage's own height already animates: the media box is 16/9 on a column
+     width that interpolates. Easing `top` over the same duration is what keeps
+     the two halves of the handoff together — the block slides down as the stage
+     shrinks, instead of the scrubber snapping 75px up the screen. It also does
+     the work in reverse, where the block stays stuck to an animating `top`
+     until that value passes its flow position and then releases into flow. */
+  transition: top .3s var(--ease);
 }
 
 /* fr values interpolate, so the video column can be animated shut. The row/
@@ -1546,6 +1609,10 @@ main {
   /* single column already; collapsing here would leave almost nothing, and a
      pinned stage on a short viewport eats the list */
   .pinned { position: static; }
+  /* And with nothing pinning, a pin button would be lying about what it does.
+     app.js gates the lock itself on the same breakpoint, so a lock set on a
+     laptop cannot freeze the mode here with no visible way to undo it. */
+  .np-pin { display: none; }
   .stage.is-collapsed { grid-template-columns: 1fr; gap: 16px; }
   .stage.is-collapsed .stage-media { display: none; }
 }

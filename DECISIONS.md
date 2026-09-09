@@ -6,6 +6,120 @@ to undo it.
 
 ---
 
+## 2026-09-09 — A pin that locks the stage, in both modes
+
+**Asked for:** a pin button on both the expanded and collapsed stage; selecting
+it locks the view.
+
+**One control, not one per mode.** It lives on the now-playing source line, which
+is the only part of the stage that renders the same in both modes — the video
+column is shut when collapsed and the title changes size. Two buttons would have
+meant two `aria-pressed` states to keep in step, for no gain.
+
+**Locking is the ABSENCE of the peel, which is why it needed no new state.** Hold
+`--stage-peel` at 0 and the block sits under the bar in whatever mode it is
+already in; return early from the scroll handler and the class cannot change. The
+mechanism from the peel work does both jobs.
+
+**Lock reads as "keep it on screen", not "keep the mode".** A pin that let the
+thing scroll away would not be a pin. So pinning while expanded holds the full
+stage under the bar, which costs 528px of viewport at 1440 — the reader's call,
+which is the point of a control.
+
+**The lock is gated on the 860px breakpoint, not just the button.** Below it
+`.pinned` is static and a pin could not hold anything on screen, so the button is
+hidden. Gating only the button would let a lock set on a laptop freeze the mode on
+a phone with no visible way to undo it.
+
+**Releasing re-evaluates immediately.** Without that the stage stays as it was
+until the reader happens to scroll again, which reads as the button not having
+worked.
+
+**It began as an icon and that was wrong.** A 15px pushpin glyph, tilted 35° when
+pressed, read as a stray cursor arrow — and right-aligned across an 840px row it
+read as a stray mark rather than a control. It is now a pill carrying the word,
+with `.eq-live`'s exact treatment. The declarations are duplicated rather than
+shared: sharing styling between the two in-stage toggles is right, but sharing a
+class NAME is what broke four selectors when the playlist picker borrowed
+`.listmode`.
+
+**Persisted in `mash.prefs.v1`.** Every other toggle in the app is, and a lock
+that forgets on reload would be the odd one out.
+
+---
+
+## 2026-09-09 — The expanded stage peels away before anything pins
+
+**Asked for, wide viewports only:** the expanded stage should scroll with the
+page; it should collapse once 50% of the now-playing block has left the view; the
+sequence should reverse on the way back up. Read as `.stage`, the element
+labelled "Now playing".
+
+**The peel and the pin are one mechanism, and that was the whole design.**
+`.pinned` sticks at `--topbar-h` minus `--stage-peel`. Set the peel to half the
+expanded stage and sticky engages at exactly the scroll position where the
+collapse is due; set it to 0 and the block sits under the bar. So there is no
+"has it pinned yet" state to keep in step with the class, and the two cannot
+disagree. A default of 0 leaves the old behaviour for a page whose script never
+runs.
+
+**The trigger is the scroll position, and that is not a shortcut.** The stage is
+the first thing under a bar whose height is a constant at every width, by
+design — so the amount of stage hidden behind that bar is exactly `scrollY`.
+Measuring the stage's own rect instead would be wrong the moment the block is
+stuck, because the rect then reports the pinned position rather than the flow
+one.
+
+**What 50% costs, measured at 1440.** The expanded stage is 385px and the
+collapsed one 117px. At the switch the block moves down 192.5px while the stage
+sheds 268px, so everything below it — scrubber, transport — lands 75.5px higher
+than it was. There is a trigger where that is exactly zero: hide 268px, which is
+69.6% of the stage, because the slice still showing is then 117px, the collapsed
+height. Not adopted; 50% was asked for. Instead `top` joins the animated
+properties, so the 75.5px eases over the same 300ms as the column close rather
+than snapping, and the same transition covers the reverse — the block stays stuck
+to an animating `top` until that value passes its flow position, then releases
+into flow.
+
+**No hysteresis band on the wide path.** The request was symmetric, and a single
+threshold is stable here: collapsing changes neither the scroll position nor the
+stage's flow offset, and `overflow-anchor` is already off. If parking exactly on
+the boundary ever reads as jitter, a few pixels on the expand side is the fix.
+The narrow path keeps its old 40-and-4 band untouched.
+
+**The expanded height cannot be read while collapsed**, which is the one real
+trap. It returns the collapsed height, which puts the trigger at about a quarter
+of where it belongs, and only a resize that happens while collapsed reaches that
+path. `measureStage()` probes both heights synchronously with transitions
+suppressed by an inline `transition: none`, because `getBoundingClientRect()`
+forces layout and would otherwise return a frame of the animation. Class list and
+inline style are both restored before the task ends, so nothing paints between
+them and the probe starts no transition of its own.
+
+**Three figures for one quantity, now measured.** A comment said the collapse
+shortens the document by ~225px, the short-list guard used 260, and a test said
+~258. It is 259 at 1100px and 268 at 1440px, so none of them was right at every
+width. The guard now uses the measured shrink, with 260 kept as the fallback for
+the narrow path, which does not measure.
+
+**The scrubber and transport peel away with the stage**, for the first ~190px of
+scroll. Rhys chose this over splitting them into their own sticky wrapper: one
+wrapper is what keeps the 33px artwork-to-scrubber gap as ordinary flow spacing,
+and splitting it would also need a stacking order for the stage passing behind
+the transport that does not exist today.
+
+**Two tests were passing vacuously and one helper was lying.** Every scroll
+position in "the pinned unit never scrolls past the top bar" was already past the
+trigger, so it went on passing while the peel did not exist; it now asserts both
+sides. The short-list guard test asserted the room exceeded 40, which stopped
+being the threshold, so it could have gone the way of its own three-row
+ancestor — it now asserts the room exceeds the measured trigger. And `settle()`
+was two animation frames against a 300ms transition; it passed only because two
+CDP round trips outlasted the animation. Five mutation checks cover the new
+behaviour and all five are caught.
+
+---
+
 ## 2026-09-09 — The API becomes the resolver, and the sidecar goes
 
 **Asked for:** the resolve API should always be the resolution path; a row
