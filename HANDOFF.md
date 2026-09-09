@@ -218,9 +218,14 @@ be caught by any test.
   mutation harness far longer. Do not run them concurrently, and never run git
   while `tools/mutate.sh` is running.
 - **`legacy/angular startAgain - backup/jukebox.js:207` contains a hardcoded
-  Google API key**, public since 2026-09-01. Pre-existing and unrelated to
-  recent work. Deleting the line does not help — it is in git history on a
-  public repository. Revoking the key is the only fix.
+  Google API key. It is REVOKED** (2026-09-09), so the line is now inert and can
+  be left alone. Two corrections worth keeping, because the first framing of this
+  was wrong in a way that understated it: the key came from the 2015 app, and it
+  was already public in `ryzzuh.github.io` — the `archive-2015` remote — first
+  committed 2015-01-14 and touched again 2015-04-22. So the exposure was about
+  eleven years, not the eight days from when `legacy/` landed here on 2026-09-01.
+  Deleting the line would never have helped: it is in the history of two public
+  repositories.
 - **Vercel builds a preview on every push to this repository**, including
   pushes that only touch the jukebox. Harmless. `Settings → Git → Ignored
   Build Step` with `git diff --quiet HEAD^ HEAD -- server` would stop it.
@@ -239,27 +244,26 @@ be caught by any test.
    On macOS, Chromium delivers audio only for a **tab** share — a window or
    whole-screen share yields no audio track, which the app reports rather than
    failing silently.
-2. **Revoke the exposed legacy Google API key.** See Gotchas.
-3. **Add a way to delete a playlist.** See Gotchas. A control on each entry in
+2. **Add a way to delete a playlist.** See Gotchas. A control on each entry in
    the playlist picker, removing the playlist and any imported tracks no other
    playlist still references.
-4. **Consider whether the daily resolve cap should be enforced server-side.**
+3. **Consider whether the daily resolve cap should be enforced server-side.**
    It is a per-browser politeness ledger today. A real global cap needs a
    key-value store on the Vercel side, which was judged disproportionate for a
    limit set at two percent of the quota allowance. See `DECISIONS.md`.
-5. **Populate liveness for the built-in library.** The `check N of M` control
+4. **Populate liveness for the built-in library.** The `check N of M` control
    in the status bar needs no key: 25 tracks a click, 300 requests a day.
    `mash.liveness.v1` has never been populated for the 1,257 built-in tracks.
-6. **Run `tools/check-liveness.mjs`** with a key to find videos that exist but
+5. **Run `tools/check-liveness.mjs`** with a key to find videos that exist but
    have embedding disabled — neither oEmbed nor a cue reports that cleanly for
    the built-in library. About 19 quota units for the whole library; resumable.
-7. **Run `tools/find-replacements.mjs`** once items 5 or 6 have found dead
+6. **Run `tools/find-replacements.mjs`** once items 4 or 5 have found dead
    tracks. It only looks at tracks already marked dead. 100 quota units each.
-8. **Consider renaming the HIDDEN list mode.** It filters unavailable tracks
+7. **Consider renaming the HIDDEN list mode.** It filters unavailable tracks
    rather than hiding titles, and "Track list visibility" no longer describes
    the group it sits in.
-9. **Delete `PR-BODY.md`** — a stopgap from before `gh` was installed.
-10. **No favicon.** `/favicon.ico` 404s on every page load. Cosmetic.
+8. **Delete `PR-BODY.md`** — a stopgap from before `gh` was installed.
+9. **No favicon.** `/favicon.ico` 404s on every page load. Cosmetic.
 
 ## Next step
 
