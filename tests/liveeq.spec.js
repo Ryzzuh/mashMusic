@@ -265,3 +265,22 @@ test("the capture asks for this tab, and does not exclude it", async ({ page }) 
   expect(opts.audio).toBeTruthy();                     // audio was asked for
   expect(opts.audio.suppressLocalAudioPlayback).toBe(false);   // still audible
 });
+
+test("the capture asks for music, not for a voice call", async ({ page }) => {
+  /* Chrome's defaults for an audio track are the voice ones, and on a tab
+     capture they are actively destructive: measured against a pure 120 Hz tone,
+     noise suppression and echo cancellation put 70-80 dB of broadband noise
+     into frequencies holding nothing, and the gain control pulled the tone down
+     9 dB so bar height stopped tracking loudness.
+
+     Like the test above this asserts the REQUEST. The effect itself is only
+     visible through a real capture, which no suite can take — see
+     tools/live-capture-check.mjs, which is run by hand and headed. */
+  await stubCapture(page, 1000);
+  await page.click("#eqLive");
+  const { audio } = await page.evaluate(() => window.__cap.opts);
+
+  expect(audio.echoCancellation).toBe(false);
+  expect(audio.noiseSuppression).toBe(false);
+  expect(audio.autoGainControl).toBe(false);
+});

@@ -2066,7 +2066,29 @@
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,                        // Chrome refuses an audio-only ask
-        audio: { suppressLocalAudioPlayback: false },   // keep hearing it
+        audio: {
+          suppressLocalAudioPlayback: false,            // keep hearing it
+          /* Chrome applies its VOICE defaults to a tab-audio track, and they
+             wreck a spectrum. Measured against a pure 120 Hz tone, captured as
+             shipped and again with these three off:
+
+                          as shipped   off
+               120 Hz        -35 dB    -26 dB    the tone itself
+               1 kHz         -91 dB   -161 dB    silence
+               4 kHz        -104 dB   -178 dB    silence
+               8 kHz        -110 dB   -191 dB    silence
+
+             So noise suppression and echo cancellation put 70-80 dB of
+             broadband noise where there is no content — which is what lit the
+             whole strip under a single low tone — and the gain control pulled
+             the real tone down 9 dB, so bar height stopped tracking loudness.
+             None of this is reachable from a test: the suite builds its own
+             MediaStream, which never passes through Chrome's audio pipeline.
+             Found by driving a real capture, 2026-09-10. */
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
         /* Chromium has defaulted selfBrowserSurface to "exclude" since 107,
            which hides the CAPTURING tab from the picker — so the one tab worth
            sharing here was the only one not listed. Reported from Edge, which

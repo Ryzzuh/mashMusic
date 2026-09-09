@@ -741,6 +741,17 @@ mut 'the expanded height is measured while collapsed' app.js \
   '    const expanded = stageEl.getBoundingClientRect().height;' \
   tests/stage.spec.js 'resize that happens while collapsed'
 
+# Chrome's voice defaults on a tab-audio track. Measured against a 120 Hz tone,
+# leaving them on injected 70-80 dB of broadband noise into empty frequencies —
+# a single low tone lit all 24 bands. Only the request is checkable here; the
+# effect needs tools/live-capture-check.mjs, which is headed and run by hand.
+mut 'the capture takes Chrome voice processing defaults' app.js \
+  '          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,' \
+  '          /* removed */' \
+  tests/liveeq.spec.js 'not for a voice call'
+
 # ------------------------------------------------------------------- the pin
 #
 # Locking is the absence of the peel, so most of these break the same variable
