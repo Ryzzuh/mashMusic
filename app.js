@@ -186,7 +186,10 @@
     // something repaints it. Only when nothing is playing: otherwise this is
     // the now-playing line and belongs to the track.
     if (!state.current) $("npSub").textContent = idleCopy();
-    resolveDurations();
+    // The API answers titles AND durations together, so let it finish before
+    // the cue resolver starts; otherwise it spends minutes on tracks the very
+    // next batch would have covered.
+    resolveAllMeta().then(resolveDurations);
   }
 
 
@@ -931,6 +934,50 @@
     if (via) via.textContent = rec.v ? "via " + rec.v : "";
   }
 
+  /* Resolve the WHOLE playlist through the API, not just what is on screen.
+   *
+   * Backfilling per rendered chunk made sense when a title cost one oEmbed
+   * request each — you only paid for what you looked at. It is the wrong shape
+   * once 50 arrive per call: a 2,007-track sheet is 41 requests and a few
+   * seconds, so waiting for the reader to scroll is pure delay. Worse, it left
+   * the cue-based duration resolver grinding through ~1,900 tracks at half a
+   * second each for durations this returns in the same batch.
+   *
+   * Falls back to per-chunk backfill when no endpoint is configured, because
+   * without one each track really does cost its own request. */
+  let bulkRunning = false;
+
+  async function resolveAllMeta() {
+    if (!META_API || bulkRunning) return 0;
+    const need = () => Object.keys(imported)
+      .filter((k) => !imported[k].t && !metaFailed.has(k));
+    if (!need().length) return 0;
+
+    bulkRunning = true;
+    let done = 0;
+    try {
+      let batch;
+      while ((batch = need().slice(0, META_API_BATCH)).length) {
+        const map = await metaFromApi(batch.map((k) => imported[k].i));
+        if (!map) break;                  // endpoint down or out of quota
+        Object.assign(metaSidecar, map);
+        applyMeta();
+        /* Anything the endpoint did not answer for must be struck off, or this
+           loop asks for the same ids forever. */
+        batch.forEach((k) => { if (!imported[k].t) metaFailed.add(k); });
+        done += batch.length;
+        $("statNote").textContent = `resolving ${done}/${done + need().length}\u2026`;
+      }
+    } finally {
+      bulkRunning = false;
+      store.write(K_IMPORT, imported);
+      const left = need().length;
+      $("statNote").textContent = left ? `${left} still unresolved` : `resolved ${done}`;
+      render(true);
+    }
+    return done;
+  }
+
   /** Ask for titles for whatever has just been rendered. */
   function backfillRendered() {
     if (!Object.keys(imported).length) return;
@@ -1160,7 +1207,10 @@
        showed it by failing to notice its removal. */
     applyMeta();
 
-    // Enough for the first screenful, so the list is never a wall of ids.
+    /* With an endpoint, the whole playlist resolves now — 50 ids a call, so
+       even a 2,000-track sheet is done before the reader has scrolled. Without
+       one, just the first screenful, so the list is never a wall of ids and
+       the rest can arrive as it is looked at. */
     const eager = fresh.slice(0, CHUNK).map((f) => f.k);
     if (eager.length) {
       setPlStatus(`fetching titles 0/${eager.length}\u2026`);
@@ -3005,7 +3055,7 @@
   booted = true;
   paintPlaylist();
   // Picks up where a previous session left off; no-ops when nothing is missing.
-  resolveDurations();
+  resolveAllMeta().then(resolveDurations);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) resolveDurations();      // the loop stops when hidden
   });

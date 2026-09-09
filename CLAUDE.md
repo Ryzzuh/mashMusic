@@ -84,6 +84,17 @@ The import must not use the `mash.livecheck.v1` ledger: that is a budget for
 background politeness, and spending it on a foreground import produced a list
 of 1,900 bare ids.
 
+**With an endpoint configured, the whole playlist resolves at once**
+(`resolveAllMeta`), in background batches of 50, and the cue-based duration
+resolver runs only afterwards on whatever is left. Backfilling per rendered
+chunk is the right shape only when a title costs its own request — it is what
+happens with no endpoint, and it is wrong with one: a 2,007-track sheet is 41
+calls, so waiting for the reader to scroll is pure delay, and it left the cue
+resolver spending ~17 minutes on durations the same call returns.
+
+Anything the endpoint answers 200 for but omits must be struck off, or the loop
+asks for it again forever.
+
 Metadata resolves in three tiers, each falling through to the next:
 `data/meta.json` → the resolve API (`config.js` → `metaApi`, see
 `server/README.md`) → oEmbed and cueing. **Empty configuration is a supported
@@ -120,6 +131,16 @@ oEmbed both answer cross-origin with no key. Two traps, both with tests:
 an unshared sheet returns an **HTML sign-in page with a 200**, and oEmbed
 **never returns duration** — imported tracks start at `d: 0` and learn it from
 the player on first play.
+
+**Deployment config must never reach the test suite.** `blockExternal()` in
+`tests/helpers.js` neutralises `window.MASH_CONFIG` before every page load.
+Without it, every test inherits whatever endpoint `config.js` is deployed with
+and starts calling a live service — which is exactly what happened when the
+site was first pointed at its own API: five specs failed because the real
+endpoint correctly reported their fake ids as gone, and a dead track will not
+play. `EXTERNAL` also blocks `vercel.app`, but that is a guess about hosting;
+the config guard is the one that holds wherever it lives, and there is a test
+asserting `metaApi` is empty during tests.
 
 **Do not give a new control a class that an existing one uses.** Sharing
 `.listmode`, `.listmode-menu` and `.search` for styling broke

@@ -6,6 +6,76 @@ to undo it.
 
 ---
 
+## 2026-09-09 — Deploying the site broke the test suite
+
+**Symptom:** five playlist specs that had passed for days began failing —
+duration learning, the 404 verdict, the unanswered request, the refused track.
+All of them keyless-path tests, none of them touched by the change being made.
+
+**Cause, and it was not the change under suspicion.** Checking out `main`'s
+`app.js` reproduced the failures exactly, which cleared the work in progress
+and pointed at the only other thing that had moved: `config.js` had been given
+a real `metaApi` endpoint. Every test inherited it, `blockExternal()` did not
+cover `vercel.app`, and the suite started calling the live service — which
+correctly reported the fake ids in those tests (`AAAAAAAAAAA`) as **gone**. A
+dead track refuses to play, so `state.current` stayed null and nothing could
+learn a duration.
+
+The suite stopped being hermetic the moment the site was configured, and
+nothing about the failure said so.
+
+**Fixed in `blockExternal()`,** which now neutralises `window.MASH_CONFIG`
+before every page load. A test that wants an endpoint sets one itself, on a
+stub host, afterwards. `vercel.app` was also added to `EXTERNAL` as a second
+line, but that is a guess about where the endpoint is hosted; the config guard
+is the one that holds wherever it lives.
+
+**Which is why the first mutation check went MISSED:** removing the config
+guard changed nothing, because the `vercel.app` block caught it instead. Two
+independent guards is the right design and a poor thing to test through one
+mutation, so the invariant is now asserted directly — `metaApi` must be empty
+during tests.
+
+**The lesson worth keeping:** a configuration file that is edited to deploy is
+a file that can silently reach the tests. Deployment config and test
+environment have to be separated deliberately, because nothing else will.
+
+---
+
+## 2026-09-09 — Resolve the whole playlist, not the visible part of it
+
+**Observed against the live endpoint:** after importing a 2,007-track sheet,
+only the first 60 rows had titles. Everything else waited to be scrolled to,
+while the cue-based duration resolver ground through ~1,900 tracks at half a
+second each — fetching durations the API already returns in the same batch.
+
+**Cause:** backfill was tied to rendering. That was correct when a title cost
+one oEmbed request each: you paid only for what you looked at. It is the wrong
+shape once 50 arrive per call. `resolveAllMeta()` now walks the whole playlist
+in batches of 50 as soon as it is selected, and `resolveDurations` is chained
+after it rather than racing it.
+
+Per-chunk backfill is kept for the no-endpoint case, where each title really
+does cost its own request, and there is a test asserting that path is unchanged.
+
+**A hazard the new loop introduced:** it asks for whatever is still unresolved,
+so an id the endpoint answers 200 for but omits stays unresolved and is asked
+for again — forever. Struck off explicitly.
+
+**That mutation check went MISSED at first, because the test was too kind.** It
+stubbed oEmbed to answer everything, so the "unanswerable" id was quietly
+resolved by the fallback and the loop had nothing to spin on. The id now has
+its oEmbed request *aborted* — which by design records no verdict — so it
+genuinely cannot resolve, which is the only state that could loop.
+
+**Bad advice corrected:** "scroll to the bottom to pull every chunk through"
+was wrong. Measured: scrolling loads exactly 60 rows per intersection, and each
+load pushes the bottom further away, so a 2,007-track list needs ~33 separate
+scrolls and feels like nothing is happening. The IntersectionObserver is
+working correctly; the advice was not.
+
+---
+
 ## 2026-09-09 — A resolve API, and why its key cannot be IP-restricted
 
 **Asked for:** put `resolve-meta` behind a Vercel API so the frontend can ask

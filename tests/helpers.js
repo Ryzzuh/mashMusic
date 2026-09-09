@@ -8,10 +8,20 @@
 
 import zlib from "node:zlib";
 
-export const EXTERNAL = /youtube\.com|youtube-nocookie|ytimg\.com|soundcloud\.com|sndcdn\.com|googleapis\.com|gstatic\.com/;
+export const EXTERNAL = /youtube\.com|youtube-nocookie|ytimg\.com|soundcloud\.com|sndcdn\.com|googleapis\.com|gstatic\.com|docs\.google\.com|vercel\.app/;
 
-/** Abort every third-party request so tests are hermetic. */
+/** Abort every third-party request so tests are hermetic.
+ *
+ * Also neutralises config.js. Once a real `metaApi` endpoint is configured
+ * there, EVERY test inherits it and starts calling a live service — which is
+ * how five specs began failing the moment the site was pointed at its own
+ * deployment: the endpoint correctly reported the fake ids in those tests as
+ * gone, and a dead track refuses to play.
+ *
+ * Deployment configuration must never reach the suite. A test that wants an
+ * endpoint sets one itself, on a stub host, after this runs. */
 export async function blockExternal(page) {
+  await page.addInitScript(() => { window.MASH_CONFIG = { metaApi: "" }; });
   await page.route(EXTERNAL, (route) => route.abort());
 }
 
