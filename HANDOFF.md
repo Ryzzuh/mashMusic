@@ -12,8 +12,9 @@ open, and both deployments are serving.
 "Done" for the current phase means: playlists can be imported from a Google
 Sheet and resolve their metadata quickly; the spectrum can follow a track that
 has no precomputed envelope. Both are built, deployed and working. What remains
-is listed under Open TODOs, and item 1 is the only thing that has never been
-exercised at all.
+is listed under Open TODOs. Everything there has now been exercised at least
+once: the last thing that had not, the live spectrum against a real capture, was
+run on 2026-09-10 and is automated in `tools/live-capture-check.mjs`.
 
 ## State
 
@@ -60,10 +61,10 @@ has been kept, so this appears deliberate.
 
 **Untouched / never run:**
 
-- The **live spectrum has never run against a real screen capture.** Every test
-  drives it with a synthetic `MediaStream` built from an oscillator, which
-  exercises the real `AudioContext`, bin-to-band mapping and draw loop but not
-  the browser's capture prompt.
+- The live spectrum **has now run against a real capture** (2026-09-10), which
+  is what `tools/live-capture-check.mjs` automates. It found a real defect the
+  suite could not: Chrome applies its VOICE defaults to a tab-audio track, and
+  a single 120 Hz tone lit all 24 bands. Fixed by asking for them off.
 - `mash.liveness.v1` has never been populated by the in-app batch against the
   full built-in library.
 - `tools/find-replacements.mjs` has never been run (needs a key, and needs dead
@@ -203,6 +204,7 @@ be caught by any test.
 | `tools/check-liveness.mjs` | Offline liveness. Resumable. Needs a key for the YouTube half. |
 | `tools/find-replacements.mjs` | YouTube replacement search. Never run; needs a key. |
 | `tools/build-envelopes.py` | Offline spectral analysis → the `mashMusic-eq` repository. |
+| `tools/live-capture-check.mjs` | The live spectrum against a REAL capture. Headed, by hand, never in the suite. |
 | `tools/mutate.sh` | Mutation harness. Edits app files in place — never run git alongside it. |
 | `tools/serve.py` | Dev server. Threaded; sends `no-store`; maps `/mashMusic-eq/`. |
 | `tests/helpers.js` | Shared helpers. `blockExternal()` also neutralises `config.js`. |
@@ -238,39 +240,36 @@ be caught by any test.
 
 ## Open TODOs
 
-1. **Try the live spectrum against a real capture.** Click "go live" on the
-   equalizer panel in a browser. This is the only feature built recently that
-   has never run outside a synthetic test. Expect a "Share this tab?" prompt.
-   On macOS, Chromium delivers audio only for a **tab** share — a window or
-   whole-screen share yields no audio track, which the app reports rather than
-   failing silently.
-2. **Add a way to delete a playlist.** See Gotchas. A control on each entry in
+1. **Add a way to delete a playlist.** See Gotchas. A control on each entry in
    the playlist picker, removing the playlist and any imported tracks no other
    playlist still references.
-3. **Consider whether the daily resolve cap should be enforced server-side.**
+2. **Consider whether the daily resolve cap should be enforced server-side.**
    It is a per-browser politeness ledger today. A real global cap needs a
    key-value store on the Vercel side, which was judged disproportionate for a
    limit set at two percent of the quota allowance. See `DECISIONS.md`.
-4. **Populate liveness for the built-in library.** The `check N of M` control
+3. **Populate liveness for the built-in library.** The `check N of M` control
    in the status bar needs no key: 25 tracks a click, 300 requests a day.
    `mash.liveness.v1` has never been populated for the 1,257 built-in tracks.
-5. **Run `tools/check-liveness.mjs`** with a key to find videos that exist but
+4. **Run `tools/check-liveness.mjs`** with a key to find videos that exist but
    have embedding disabled — neither oEmbed nor a cue reports that cleanly for
    the built-in library. About 19 quota units for the whole library; resumable.
-6. **Run `tools/find-replacements.mjs`** once items 4 or 5 have found dead
+5. **Run `tools/find-replacements.mjs`** once items 3 or 4 have found dead
    tracks. It only looks at tracks already marked dead. 100 quota units each.
-7. **Consider renaming the HIDDEN list mode.** It filters unavailable tracks
+6. **Consider renaming the HIDDEN list mode.** It filters unavailable tracks
    rather than hiding titles, and "Track list visibility" no longer describes
    the group it sits in.
-8. **Delete `PR-BODY.md`** — a stopgap from before `gh` was installed.
-9. **No favicon.** `/favicon.ico` 404s on every page load. Cosmetic.
+7. **Delete `PR-BODY.md`** — a stopgap from before `gh` was installed.
+8. **No favicon.** `/favicon.ico` 404s on every page load. Cosmetic.
 
 ## Next step
 
-Item 1: open https://ryzzuh.github.io/mashMusic/ , play any track, and click
-**go live** on the equalizer panel. Allow the capture prompt with tab audio
-enabled. The tag beside the spectrum should read `live · tab audio` and the
-bars should follow the music. If the prompt does not offer this tab, that is
-the `selfBrowserSurface` behaviour described in Decisions and the deployed code
-already sets both options that address it — so report what the prompt actually
-shows rather than assuming the fix did not land.
+Nothing is blocked. Item 1, a way to delete a playlist, is the only entry that
+is a missing feature rather than a batch job or a cosmetic tidy: re-importing
+the same sheet stacks a second entry in the picker, the tracks dedupe but the
+playlist rows do not, and there is no way to remove either from the interface.
+
+If you want to see the live spectrum for yourself rather than trust a script:
+`node tools/live-capture-check.mjs` runs it headed against the deployed site,
+grants its own capture, and checks a tone lands in the right band. Headless is
+not an option — the capture is granted but carries silence, and every bar reads
+zero, which looks exactly like a broken feature.

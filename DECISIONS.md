@@ -6,6 +6,52 @@ to undo it.
 
 ---
 
+## 2026-09-10 — The live spectrum, run for real, and what that found
+
+**Asked for:** try the live spectrum against a real capture. It had only ever
+run against a stubbed `getDisplayMedia` returning an oscillator.
+
+**It works.** A real capture on the deployed site, granted to the app's own "go
+live" click, reports `live · tab audio`, and with a real YouTube track playing
+all 24 bands move. A 1 kHz tone peaks at band 12 and a 120 Hz tone at band 4,
+both where the mapping says they should.
+
+**Two facts make this runnable without a human at the picker**, which is why it
+is now `tools/live-capture-check.mjs` rather than a paragraph of instructions.
+Chrome's `--auto-accept-this-tab-capture` grants the request with no dialog. And
+headless has **no audio device**: the capture is granted, the track is live, and
+it carries silence, so every bar reads zero. That looks exactly like a broken
+feature and is not — it cost a wrong conclusion before the headed run corrected
+it. The script is headed only, and never runs in the suite.
+
+**The defect it found, which no test could have.** Chrome applies its VOICE
+defaults to a tab-audio track: echo cancellation, noise suppression and
+automatic gain control, all on. Measured against a pure 120 Hz tone, captured as
+shipped and again with the three disabled:
+
+|              | as shipped | disabled |
+|--------------|-----------:|---------:|
+| 120 Hz, the tone | -35 dB | -26 dB |
+| 1 kHz, silence   | -91 dB | -161 dB |
+| 4 kHz, silence   | -104 dB | -178 dB |
+| 8 kHz, silence   | -110 dB | -191 dB |
+
+So the pipeline was putting 70-80 dB of broadband noise into frequencies holding
+nothing, and the gain control was pulling the real tone down 9 dB so bar height
+stopped tracking loudness. On screen, a 1 kHz tone read as a peak sitting on a
+floor across two thirds of the strip; a 120 Hz tone lit all 24 bands.
+
+**Fixed by asking for all three off.** After: a 1 kHz tone draws two bands and
+nothing else, and 120 Hz draws three.
+
+**The suite can only assert the request, and that is not a gap worth closing.**
+It builds its own `MediaStream`, which never passes through Chrome's audio
+pipeline, so the effect is invisible there by construction. A test was added for
+the constraints being asked for, with a mutation check; the effect itself belongs
+to the by-hand script.
+
+---
+
 ## 2026-09-09 — A pin that locks the stage, in both modes
 
 **Asked for:** a pin button on both the expanded and collapsed stage; selecting
