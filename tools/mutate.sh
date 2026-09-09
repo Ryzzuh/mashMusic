@@ -581,47 +581,53 @@ mut 'resolving does not resume from a previous session' app.js \
   '  document.addEventListener("visibilitychange", () => {' \
   tests/playlist.spec.js 'picks up where the last session stopped'
 
-mut 'a title still arriving is shown as a bare id' app.js \
-  '      name.textContent = "Resolving \u2014 " + track.i;' \
-  '      name.textContent = track.i;' \
-  tests/playlist.spec.js 'says so instead of showing a bare id'
+mut 'an id is shown while its lookup is still open' app.js \
+  '      name.textContent = "Resolving\u2026";
+      name.classList.add("is-pending");' \
+  '      name.textContent = track.i;
+      name.classList.add("is-pending");' \
+  tests/playlist.spec.js 'shows no id at all'
 
 mut 'resolved durations are held in memory until the run ends' app.js \
   '        if (++sinceWrite >= 10) { sinceWrite = 0; store.write(K_IMPORT, imported); }' \
   '        sinceWrite++;' \
   tests/playlist.spec.js 'saved as they resolve'
 
-# ------------------------------------------------------- metadata sidecar
+# --------------------------------------------- resolution state on the record
+#
+# The metadata sidecar's mutations lived here. Two of them had live equivalents
+# once the API became the resolver and moved in below; the third — embeddable
+# checked after applyMeta's short-circuit — was dropped with the test that
+# caught it, because a source that cannot arrive after the records it wrote
+# makes the ordering unobservable. See DECISIONS.md.
 
-mut 'the committed sidecar is ignored on import' app.js \
-  "    applyMeta();" \
-  "    void 0;" \
-  tests/playlist.spec.js 'no lookups at all'
+mut 'a failed lookup is not recorded on the record' app.js \
+  '        if (!rec.x) { rec.x = 1; metaFailed.add(k); n++; }' \
+  '        if (!rec.x) { metaFailed.add(k); }' \
+  tests/playlist.spec.js 'keeps showing its id across a reload'
 
-mut 'the sidecar never reaches an already-imported playlist' app.js \
-  '    if (applyMeta()) { rebuildLibrary(); render(true); }' \
-  '    void 0;' \
-  tests/playlist.spec.js 'imported before it existed'
+mut 'a settled verdict is reopened by the keyless fallback' app.js \
+  '    const left = want.filter((k) => imported[k] && !imported[k].t && !metaFailed.has(k));' \
+  '    const left = want.filter((k) => imported[k] && !imported[k].t);' \
+  tests/playlist.spec.js 'keeps showing its id across a reload'
 
-# This ordering is the bug that shipped in the first draft: with the check
-# below the short-circuit, an import that pre-filled its fields from the
-# sidecar skipped every embeddable verdict.
-mut 'embeddable is checked after the already-applied short-circuit' app.js \
-  '      if (m.e === false) {
-        markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
-      }
-      if (rec.t === m.t && rec.d === m.d) continue;      // fields already applied' \
-  '      if (rec.t === m.t && rec.d === m.d) continue;
-      if (m.e === false) {
-        markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
-      }' \
-  tests/playlist.spec.js 'applied on every load'
+mut 'a corrected record never reaches the rendered library' app.js \
+  '      if (changed) rebuildLibrary();' \
+  '      void changed;' \
+  tests/playlist.spec.js 'before the endpoint existed'
+
+mut 'the resolver settles for a title and leaves the duration' app.js \
+  '      .filter((k) => (!imported[k].t || !imported[k].d) &&
+                     !metaFailed.has(k) && !metaApiSkip.has(k));' \
+  '      .filter((k) => !imported[k].t &&
+                     !metaFailed.has(k) && !metaApiSkip.has(k));' \
+  tests/playlist.spec.js 'before the endpoint existed'
 
 # ----------------------------------------------------------- the resolve API
 
 mut 'the API tier is skipped entirely' app.js \
-  '      const map = await metaFromApi(slice.map((k) => imported[k].i));' \
-  '      const map = null;' \
+  '      const res = await metaFromApi(slice.map((k) => imported[k].i));' \
+  '      const res = null;' \
   tests/playlist.spec.js 'sparing oEmbed and the cue player'
 
 mut 'an API failure is treated as an empty answer, not a fallback' app.js \
@@ -637,7 +643,7 @@ mut 'the API asks one id at a time instead of batching' app.js \
 mut 'a configured endpoint is ignored' app.js \
   '  const META_API = (window.MASH_CONFIG || {}).metaApi || "";' \
   '  const META_API = "";' \
-  tests/playlist.spec.js "API's verdicts land"
+  tests/playlist.spec.js 'records gone and blocked'
 
 mut 'the whole playlist is never resolved, only what is rendered' app.js \
   '    if (!META_API || bulkRunning) return 0;' \
@@ -645,7 +651,9 @@ mut 'the whole playlist is never resolved, only what is rendered' app.js \
   tests/playlist.spec.js 'whole playlist resolves'
 
 mut 'unanswerable ids are asked for forever' app.js \
-  '        batch.forEach((k) => { if (!imported[k].t) metaFailed.add(k); });' \
+  '        batch.forEach((k) => {
+          if (!imported[k].t || !imported[k].d) metaApiSkip.add(k);
+        });' \
   '        void batch;' \
   tests/playlist.spec.js 'do not spin the resolver forever'
 
@@ -663,6 +671,27 @@ mut "deployment config leaks into the test suite" tests/helpers.js \
   '  await page.addInitScript(() => { window.MASH_CONFIG = { metaApi: "" }; });' \
   '  void 0;' \
   tests/playlist.spec.js 'hermetic against whatever config'
+
+# ------------------------------------------------------ the daily resolve budget
+
+mut 'the daily limit is not enforced at all' app.js \
+  '    spendMeta(ids.length);' \
+  '    void ids;' \
+  tests/playlist.spec.js 'one unit of budget per id'
+
+# NOT mutation-checked, deliberately: metaFromApi()'s own `{capped}` return.
+# Both callers trim their batch to the remaining budget first, so it is a race
+# guard for two resolvers in flight together — unreachable in a single one, and
+# a mutation there reports MISSED because no test can interleave them. The
+# distinction it protects IS covered, at the callers, by the two checks around
+# this comment.
+
+mut 'a capped run marks its waiting tracks failed' app.js \
+  '    if (capped) {
+      left.forEach((k) => metaPending.delete(k));' \
+  '    if (false) {
+      left.forEach((k) => metaPending.delete(k));' \
+  tests/playlist.spec.js 'reported as waiting'
 
 print ""
 if (( fails )); then print "$fails missed"; exit 1; else print "all caught"; fi

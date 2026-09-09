@@ -3,9 +3,11 @@
  * metaApi — a deployed server/api/resolve.js, e.g.
  *           "https://mashmusic-meta.vercel.app/api/resolve"
  *
- * Empty is the default and a supported state: the app resolves titles from
- * oEmbed and durations by cueing, which needs no key and no server. Setting
- * this only makes it faster.
+ * Set, this is THE resolver: the whole playlist goes through it, fifty ids a
+ * call, up to a daily budget. Empty is still a supported state — the app falls
+ * back to oEmbed titles and durations read off a cued player, which needs no
+ * key and no server — but it is the slow path, one request per title and no
+ * durations at all until each one is cued.
  *
  * A plain script rather than JSON so the site still works opened from disk,
  * for the same reason data/tracks.js is one. It does not overwrite an existing

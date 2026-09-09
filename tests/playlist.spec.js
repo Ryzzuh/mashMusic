@@ -50,10 +50,14 @@ async function stubOembed(page, opts = {}) {
   return seen;
 }
 
-/** Rows as the reader sees them: name, whether it is still provisional. */
+/** Rows as the reader sees them. A name is in one of three states, and the
+ *  suite has to be able to tell them apart: resolved, still resolving, or
+ *  resolved-and-came-back-with-nothing, which is the only one that shows the
+ *  bare id. */
 const rowsShown = (page) => page.$$eval(".trow", (rs) => rs.map((r) => ({
   name: r.querySelector(".t-name").textContent,
   pending: r.querySelector(".t-name").classList.contains("is-pending"),
+  unresolved: r.querySelector(".t-name").classList.contains("is-unresolved"),
   dead: r.classList.contains("is-dead"),
 })));
 
@@ -357,7 +361,10 @@ test("a title that 404s marks the track dead rather than pending forever", async
   await expect.poll(async () => (await rowsShown(page))[1].dead).toBe(true);
   const shown = await rowsShown(page);
   expect(shown[0]).toMatchObject({ name: "Title AAAAAAAAAAA", pending: false, dead: false });
-  expect(shown[1]).toMatchObject({ name: "Resolving — BBBBBBBBBBB", pending: true, dead: true });
+  /* The id, alone, and no longer pending: the lookup happened and answered
+     with nothing, which is the one case that earns showing it. */
+  expect(shown[1]).toMatchObject({ name: "BBBBBBBBBBB", pending: false,
+                                   unresolved: true, dead: true });
 
   await expect(page.locator("#statDead")).toHaveText("1 unavailable");
   const live = await page.evaluate(() =>
@@ -373,7 +380,9 @@ test("a request that never lands leaves the track pending, not dead", async ({ p
   await expect.poll(rowCount(page)).toBe(1);
 
   const shown = await rowsShown(page);
-  expect(shown[0]).toMatchObject({ name: "Resolving — AAAAAAAAAAA", pending: true, dead: false });
+  /* No verdict, so no id: showing one would claim the lookup was over. */
+  expect(shown[0]).toMatchObject({ name: "Resolving\u2026", pending: true,
+                                   unresolved: false, dead: false });
   // no verdict was given, so none is recorded
   expect(await page.evaluate(() =>
     localStorage.getItem("mash.liveness.v1"))).toBeNull();
@@ -463,12 +472,16 @@ test("resolving picks up where the last session stopped", async ({ page }) => {
   await expect.poll(async () => (await importedStore(page))["YT:BBBBBBBBBBB"].d).toBe(355);
 });
 
-test("a title still arriving says so instead of showing a bare id", async ({ page }) => {
+test("a title still arriving says so and shows no id at all", async ({ page }) => {
+  /* The id is not a placeholder. Until a lookup has answered, the honest thing
+     is to say the lookup is running — an id here reads both as a track called
+     that and as a finished answer, and it is neither. */
   await stubSheet(page, "AAAAAAAAAAA\n");
   await stubOembed(page, { fail: ["AAAAAAAAAAA"] });
   await importSheet(page);
   await expect.poll(rowCount(page)).toBe(1);
-  await expect(page.locator(".t-name").first()).toHaveText("Resolving — AAAAAAAAAAA");
+  await expect(page.locator(".t-name").first()).toHaveText("Resolving\u2026");
+  await expect(page.locator(".t-name").first()).not.toContainText("AAAAAAAAAAA");
 });
 
 
@@ -496,138 +509,6 @@ test("durations are saved as they resolve, not only when the run ends", async ({
 
   const partial = Object.values(await importedStore(page)).filter((v) => v.d > 0).length;
   expect(partial).toBeLessThan(30);             // and the run is still going
-});
-
-
-/* ---------------------------------------------------- the metadata sidecar */
-
-/** Serve data/meta.json, as tools/resolve-meta.mjs would have written it. */
-async function stubMeta(page, body) {
-  await page.route("**/data/meta.json", (r) =>
-    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) }));
-}
-
-test("a committed sidecar resolves an import with no lookups at all", async ({ page }) => {
-  /* The point of tools/resolve-meta.mjs: run it once where a key exists,
-     commit the output, and every other machine resolves instantly without a
-     key, without oEmbed and without cueing anything. */
-  await stubMeta(page, {
-    "YT:AAAAAAAAAAA": { t: "Real Title A", v: "Real Channel", d: 253, a: "", e: true },
-    "YT:BBBBBBBBBBB": { t: "Real Title B", v: "Real Channel", d: 411, a: "", e: true },
-  });
-  await fakeYT(page, {});                       // any cue would hang, proving none happens
-  await page.reload();
-
-  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\n");
-  const asked = await stubOembed(page);
-  await importSheet(page);
-  await expect.poll(rowCount(page)).toBe(2);
-
-  await expect(page.locator(".trow").first()).toContainText("Real Title A");
-  await expect(page.locator('.trow[data-key="YT:AAAAAAAAAAA"] .t-dur')).toHaveText("4:13");
-  await expect(page.locator('.trow[data-key="YT:BBBBBBBBBBB"] .t-dur')).toHaveText("6:51");
-
-  expect(asked).toEqual([]);                    // oEmbed was never called
-  const cued = await page.evaluate(() => window.__yt.cued);
-  expect(cued).toEqual([]);                     // and nothing was cued
-});
-
-test("the sidecar carries embeddable, which neither oEmbed nor a cue reports", async ({ page }) => {
-  await stubMeta(page, {
-    "YT:AAAAAAAAAAA": { t: "Fine", v: "C", d: 100, a: "", e: true },
-    "YT:BBBBBBBBBBB": { t: "Embedding off", v: "C", d: 200, a: "", e: false },
-    "YT:CCCCCCCCCCC": { gone: true },
-  });
-  await fakeYT(page, {});
-  await page.reload();
-  await stubSheet(page, "AAAAAAAAAAA\nBBBBBBBBBBB\nCCCCCCCCCCC\n");
-  await stubOembed(page);
-  await importSheet(page);
-  await expect.poll(rowCount(page)).toBe(3);
-
-  await expect.poll(async () => {
-    const l = await page.evaluate(() => JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
-    return l["YT:BBBBBBBBBBB"]?.s;
-  }).toBe("blocked");
-  const live = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
-  expect(live["YT:BBBBBBBBBBB"]).toMatchObject({ s: "blocked", v: "api" });
-  expect(live["YT:CCCCCCCCCCC"]).toMatchObject({ s: "gone", v: "api" });
-  expect(live["YT:AAAAAAAAAAA"]).toBeUndefined();
-  await expect(page.locator("#statDead")).toHaveText("2 unavailable");
-});
-
-test("the sidecar fixes up a playlist imported before it existed", async ({ page }) => {
-  /* The machine that imported first has oEmbed titles and no durations. When
-     the sidecar lands it should correct them in place, not require a re-import. */
-  await page.evaluate(() => {
-    localStorage.setItem("mash.imported.v1", JSON.stringify({
-      "YT:AAAAAAAAAAA": { k: "YT:AAAAAAAAAAA", s: "YT", i: "AAAAAAAAAAA",
-                          t: "oembed title", v: "", d: 0, a: "", c: "" },
-    }));
-    localStorage.setItem("mash.playlists.v1", JSON.stringify([
-      { id: "p1", name: "Old", type: "sheets", source: "x", keys: ["YT:AAAAAAAAAAA"], added: 1 },
-    ]));
-    localStorage.setItem("mash.playlist.v1", JSON.stringify("p1"));
-  });
-  await stubMeta(page, {
-    "YT:AAAAAAAAAAA": { t: "Authoritative Title", v: "Chan", d: 321, a: "", e: true },
-  });
-  await fakeYT(page, {});
-  await page.reload();
-
-  await expect.poll(rowCount(page)).toBe(1);
-  await expect(page.locator(".t-name").first()).toHaveText("Authoritative Title");
-  await expect(page.locator(".t-dur").first()).toHaveText("5:21");
-  expect((await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(321);
-});
-
-test("no sidecar changes nothing", async ({ page }) => {
-  await page.route("**/data/meta.json", (r) => r.fulfill({ status: 404, body: "" }));
-  await fakeYT(page, { AAAAAAAAAAA: 150 });
-  await page.reload();
-  await stubSheet(page, "AAAAAAAAAAA\n");
-  const asked = await stubOembed(page);
-  await importSheet(page);
-  await expect.poll(rowCount(page)).toBe(1);
-
-  // falls straight back to the keyless path
-  expect(asked).toEqual(["AAAAAAAAAAA"]);
-  await expect.poll(async () => (await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(150);
-});
-
-
-test("the sidecar's verdicts are applied on every load, not only when fields change", async ({ page }) => {
-  /* A returning session: the imported records already match the sidecar
-     exactly, so the field copying is skipped. The gone/blocked verdicts must
-     still be recorded — they are facts about the track, not a side effect of
-     writing a title. Getting this order wrong meant an import that had already
-     pre-filled its fields recorded no blocked tracks at all. */
-  await page.evaluate(() => {
-    localStorage.setItem("mash.imported.v1", JSON.stringify({
-      "YT:AAAAAAAAAAA": { k: "YT:AAAAAAAAAAA", s: "YT", i: "AAAAAAAAAAA",
-                          t: "Settled", v: "C", d: 240, a: "", c: "" },
-    }));
-    localStorage.setItem("mash.playlists.v1", JSON.stringify([
-      { id: "p1", name: "Saved", type: "sheets", source: "x",
-        keys: ["YT:AAAAAAAAAAA"], added: 1 },
-    ]));
-    localStorage.setItem("mash.playlist.v1", JSON.stringify("p1"));
-    localStorage.removeItem("mash.liveness.v1");        // nothing recorded yet
-  });
-  // identical title and duration, so the copy is short-circuited
-  await stubMeta(page, {
-    "YT:AAAAAAAAAAA": { t: "Settled", v: "C", d: 240, a: "", e: false },
-  });
-  await fakeYT(page, {});
-  await page.reload();
-
-  await expect.poll(async () => {
-    const l = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("mash.liveness.v1") || "{}"));
-    return l["YT:AAAAAAAAAAA"]?.s;
-  }).toBe("blocked");
-  await expect(page.locator("#statDead")).toHaveText("1 unavailable");
 });
 
 
@@ -695,7 +576,7 @@ test("the API falls back to oEmbed when it cannot answer", async ({ page }) => {
   await expect.poll(async () => (await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(180);
 });
 
-test("the API's verdicts land like the sidecar's", async ({ page }) => {
+test("the API records gone and blocked, not just titles", async ({ page }) => {
   await setApi(page);
   await stubApi(page, {
     AAAAAAAAAAA: { t: "Fine", v: "C", d: 100, a: "", e: true },
@@ -836,4 +717,177 @@ test("the suite is hermetic against whatever config.js is deployed with", async 
      blockExternal() also blocks vercel.app, but that is a guess about where
      the endpoint is hosted. This is the guard that holds wherever it lives. */
   expect(await page.evaluate(() => window.MASH_CONFIG.metaApi)).toBe("");
+});
+
+
+/* ------------------------------------------- what the API replaced the sidecar with
+ *
+ * A committed data/meta.json used to sit in front of the API, written by a
+ * tools script on a machine that had a key. It was removed: it returned
+ * exactly what the endpoint returns and had to be regenerated by hand. These
+ * two tests came from it, because the behaviour they cover is the API's now. */
+
+test("the API corrects a playlist imported before the endpoint existed", async ({ page }) => {
+  /* A machine that imported with no endpoint has oEmbed titles and no
+     durations. When an endpoint is configured, videos.list is the more
+     authoritative source and should correct them in place, without a
+     re-import. */
+  await page.evaluate(() => {
+    localStorage.setItem("mash.imported.v1", JSON.stringify({
+      "YT:AAAAAAAAAAA": { k: "YT:AAAAAAAAAAA", s: "YT", i: "AAAAAAAAAAA",
+                          t: "oembed title", v: "", d: 0, a: "", c: "" },
+    }));
+    localStorage.setItem("mash.playlists.v1", JSON.stringify([
+      { id: "p1", name: "Old", type: "sheets", source: "x", keys: ["YT:AAAAAAAAAAA"], added: 1 },
+    ]));
+    localStorage.setItem("mash.playlist.v1", JSON.stringify("p1"));
+  });
+  await setApi(page);
+  await stubApi(page, {
+    AAAAAAAAAAA: { t: "Authoritative Title", v: "Chan", d: 321, a: "", e: true },
+  });
+  await fakeYT(page, {});
+  await page.reload();
+
+  await expect.poll(rowCount(page)).toBe(1);
+  await expect(page.locator(".t-name").first()).toHaveText("Authoritative Title");
+  await expect(page.locator(".t-dur").first()).toHaveText("5:21");
+  expect((await importedStore(page))["YT:AAAAAAAAAAA"].d).toBe(321);
+});
+
+/* The sidecar's "verdicts re-applied on every load" test died with it, and
+ * deliberately has no replacement. It existed because a committed file could
+ * arrive AFTER the records it described, so a record already carrying its
+ * fields still needed its verdict read off. The API cannot arrive after the
+ * records it wrote: whatever wrote the fields recorded the verdict in the same
+ * pass. Nothing re-asks about a complete record now, which is the point of the
+ * budget. */
+
+
+/* ------------------------------------------------------ the daily resolve budget */
+
+/** Pre-spend the day's allowance, leaving `left` ids of it. */
+const spendBudget = (page, left) => page.addInitScript((remaining) => {
+  localStorage.setItem("mash.metabudget.v1", JSON.stringify({
+    day: new Date().toISOString().slice(0, 10),
+    spent: 10000 - remaining,
+  }));
+}, left);
+
+test("the resolver stops at the daily limit instead of resolving anyway", async ({ page }) => {
+  await setApi(page);
+  await spendBudget(page, 0);
+  const calls = await stubApi(page, {
+    AAAAAAAAAAA: { t: "Would have resolved", v: "C", d: 100, a: "", e: true },
+  });
+  await fakeYT(page, {});
+  await page.reload();
+
+  await stubSheet(page, "AAAAAAAAAAA\n");
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(1);
+  await page.waitForTimeout(800);
+
+  expect(calls.length).toBe(0);                 // the endpoint was never asked
+  expect(asked).toEqual([]);                    // and it did NOT fall back
+});
+
+test("hitting the limit is reported as waiting, never as a failed track", async ({ page }) => {
+  /* The distinction the whole budget rests on. An id we chose not to ask about
+     today is not an id that came back with nothing: it keeps saying it is
+     resolving, shows no id, records no verdict, and is picked up tomorrow. */
+  await setApi(page);
+  await spendBudget(page, 0);
+  await stubApi(page, {});
+  await fakeYT(page, {});
+  await page.reload();
+
+  await stubSheet(page, "AAAAAAAAAAA\n");
+  await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(1);
+
+  await expect(page.locator("#statNote")).toContainText("daily resolve limit");
+  const shown = await rowsShown(page);
+  expect(shown[0]).toMatchObject({ name: "Resolving\u2026", pending: true, unresolved: false });
+  expect((await importedStore(page))["YT:AAAAAAAAAAA"].x).toBeUndefined();
+  expect(await page.evaluate(() =>
+    localStorage.getItem("mash.liveness.v1"))).toBeNull();
+});
+
+test("a run spends one unit of budget per id asked about", async ({ page }) => {
+  const ids = Array.from({ length: 60 }, (_, i) => "H" + String(i).padStart(4, "0") + "aaaaaa");
+  const table = {};
+  ids.forEach((id, i) => { table[id] = { t: "T" + i, v: "C", d: 100, a: "", e: true }; });
+
+  await setApi(page);
+  await stubApi(page, table);
+  await fakeYT(page, {});
+  await page.reload();
+
+  await stubSheet(page, ids.join("\n"));
+  await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(async () => {
+    const imp = await importedStore(page);
+    return Object.values(imp).filter((v) => v.t).length;
+  }, { timeout: 20_000 }).toBe(60);
+
+  const led = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("mash.metabudget.v1") || "{}"));
+  expect(led.spent).toBe(60);
+  expect(led.day).toBe(new Date().toISOString().slice(0, 10));
+});
+
+test("a budget only partly spent still resolves what it can", async ({ page }) => {
+  /* 30 left and 60 wanted. The point is that it resolves 30 rather than
+     refusing outright, and that the rest wait rather than failing. */
+  const ids = Array.from({ length: 60 }, (_, i) => "J" + String(i).padStart(4, "0") + "aaaaaa");
+  const table = {};
+  ids.forEach((id, i) => { table[id] = { t: "T" + i, v: "C", d: 100, a: "", e: true }; });
+
+  await setApi(page);
+  await spendBudget(page, 30);
+  await stubApi(page, table);
+  await fakeYT(page, {});
+  await page.reload();
+
+  await stubSheet(page, ids.join("\n"));
+  const asked = await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(60);
+
+  await expect.poll(async () => {
+    const imp = await importedStore(page);
+    return Object.values(imp).filter((v) => v.t).length;
+  }, { timeout: 20_000 }).toBe(30);
+
+  await page.waitForTimeout(800);
+  const imp = await importedStore(page);
+  expect(Object.values(imp).filter((v) => v.t).length).toBe(30);   // and no further
+  expect(Object.values(imp).filter((v) => v.x).length).toBe(0);    // none marked failed
+  expect(asked).toEqual([]);                                       // no keyless overspill
+});
+
+test("a failed id keeps showing its id across a reload", async ({ page }) => {
+  /* The verdict is on the record, not in a set, precisely so this holds. If it
+     were in memory the row would go back to claiming it was still resolving
+     every time the page loaded, and re-ask about a video already known gone. */
+  await setApi(page);
+  await stubApi(page, { AAAAAAAAAAA: { gone: true } });
+  await fakeYT(page, {});
+  await page.reload();
+
+  await stubSheet(page, "AAAAAAAAAAA\n");
+  await stubOembed(page);
+  await importSheet(page);
+  await expect.poll(rowCount(page)).toBe(1);
+  await expect.poll(async () => (await rowsShown(page))[0].unresolved).toBe(true);
+  expect((await importedStore(page))["YT:AAAAAAAAAAA"].x).toBe(1);
+
+  await page.reload();
+  await expect.poll(rowCount(page)).toBe(1);
+  const shown = await rowsShown(page);
+  expect(shown[0]).toMatchObject({ name: "AAAAAAAAAAA", pending: false, unresolved: true });
 });

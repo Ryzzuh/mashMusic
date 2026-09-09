@@ -1677,14 +1677,27 @@ main {
 
 /* ------------------------------------------------------------- playlists */
 
-/* A title that has not arrived yet. The id is shown because it is what is
-   actually known — but in the mono face used for ids elsewhere, and dimmed, so
-   it never reads as the track's name. */
+/* A title that has not arrived yet. Dimmed and set in the mono face used for
+   ids elsewhere, so a row still in flight never reads as a track named that.
+   The id itself is deliberately NOT here: while the lookup is still open, or
+   deferred to tomorrow's budget, showing it would claim an answer we have not
+   had. */
 .t-name.is-pending {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 11px;
   letter-spacing: .04em;
   color: var(--ink-3);
+}
+
+/* The one place an id appears as a row's name: resolution was tried and came
+   back with nothing, so the id is the most that is known. Same mono face, but
+   tinted like the other unavailable states rather than dimmed, because this is
+   an outcome and not a wait. */
+.t-name.is-unresolved {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .04em;
+  color: var(--dead);
 }
 
 /* The playlist picker reuses .listmode wholesale — same pill, same caret, same

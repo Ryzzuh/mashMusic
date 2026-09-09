@@ -6,6 +6,87 @@ to undo it.
 
 ---
 
+## 2026-09-09 — The API becomes the resolver, and the sidecar goes
+
+**Asked for:** the resolve API should always be the resolution path; a row
+should show a video id only when resolving has failed for that id; resolve at
+most 10,000 ids a day.
+
+**The number was in the wrong unit, and it was worth saying so before using
+it.** `videos.list` bills one quota unit per *call* of up to fifty ids, so ten
+thousand ids is two hundred calls and two hundred units of a ten-thousand-*unit*
+daily allowance, and the CDN answers a repeated id for nothing at all. The cap
+is a sanity limit with roughly fifty times headroom, not an operating
+constraint. Kept at the figure asked for, in one constant, `META_DAY_CAP`.
+
+**The cap is enforced in the browser, and that makes it a politeness ledger
+rather than a guarantee.** A genuinely global cap needs server-side state, which
+a Vercel function has none of without adding a key-value store. That is a real
+dependency for a limit set at two percent of the allowance, when the endpoint is
+already defended by a day-long CDN cache and by the key being restricted to one
+API. Same shape as `mash.livecheck.v1`, which caps the liveness checker.
+
+**Capped is not failed, and the code refuses to conflate them.** `metaFromApi()`
+used to return a map or `null`; it now returns `{map}`, `{capped}` or `null`.
+`null` means the endpoint could not answer and sends the caller to the keyless
+fallback — so folding "we hit our own cap" into it would have gone and resolved
+the exact ids the cap exists to defer. A capped run stops, says so in the status
+line, and marks nothing dead.
+
+**An id on a row is now a claim, so it takes a verdict.** Rows used to read
+`Resolving — <id>`, which showed the id in every not-yet state. Three states
+now: a title, `Resolving…` with no id at all, and the bare id in `.is-unresolved`
+once a source has answered with nothing. The verdict is persisted as `x: 1` on
+the imported record rather than kept in a set, because an in-memory set would
+send every row back to claiming it was still resolving on each reload, and
+re-ask about videos YouTube has already called gone.
+
+**The keyless paths were kept as a failure path, not deleted.** Deleting oEmbed
+titles and the cue-based duration resolver was on the table and would have
+removed about two hundred lines and eight tests. Rhys chose to keep them: the
+API resolves first and always, and they run only for ids it could not answer, so
+a fork with no deployment still works.
+
+**`data/meta.json` and `tools/resolve-meta.mjs` were removed.** The sidecar
+returned byte-for-byte what the endpoint returns, had to be regenerated and
+committed by hand to stay current, and never once existed on disk. Its only real
+advantage was costing no request, and resolved titles persisting in
+`mash.imported.v1` already cover that. Reversing this means restoring the tool
+and the boot fetch from git history; nothing else depended on it.
+
+**Two bugs the conversion exposed, both of which predate it.**
+
+1. `fillMeta()` computed its oEmbed worklist as "no title yet", which included
+   ids the API loop had *just* marked gone. `videos.list` saying a video is
+   absent is not a question oEmbed gets to reopen, and without the filter a
+   settled verdict collected an oEmbed title that overwrote it.
+2. `resolveAllMeta()` corrected records in `imported` and then called
+   `render(true)` without `rebuildLibrary()`. TRACKS and the rendered view hold
+   separate objects, so on a returning session the screen kept the stale title.
+   A fresh import hid this, because importing rebuilds anyway.
+
+**A mutation that reported MISSED, and why it stays uncovered.** Turning
+`metaFromApi()`'s `{capped}` return into `null` is not detected by any test, and
+the first read of that was "the test is weak". It is not. Both callers trim
+their batch to the remaining budget before calling, so in a single resolver the
+branch is unreachable — the mutation changes nothing to detect. It is not dead
+code either: trimming and spending are two steps, and `fillMeta()` and
+`resolveAllMeta()` can be in flight together, so a batch sized against the
+budget can outlast it. It is a race guard, it needs two resolvers interleaved at
+one point to reach, and that is not worth building a test harness for. The entry
+was removed from `tools/mutate.sh` with the reasoning in its place; the
+distinction it protects is covered at both callers.
+
+**One test was retired with no replacement, deliberately.** "The sidecar's
+verdicts are applied on every load" existed because a committed file could
+arrive *after* the records it described. The API cannot arrive after the records
+it wrote — whatever writes the fields records the verdict in the same pass — and
+nothing re-asks about a complete record now, which is the whole point of the
+budget. The defensive ordering inside `applyMeta()` is kept and its comment now
+says it is belt and braces.
+
+---
+
 ## 2026-09-09 — Deploying the site broke the test suite
 
 **Symptom:** five playlist specs that had passed for days began failing —

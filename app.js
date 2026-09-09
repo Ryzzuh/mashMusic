@@ -46,6 +46,7 @@
   const K_LISTS = "mash.playlists.v1";
   const K_IMPORT = "mash.imported.v1";
   const K_LIST = "mash.playlist.v1";
+  const K_META = "mash.metabudget.v1";
 
   /* Liveness:
    *   { "YT:xyz": { s: "gone"|"blocked"|"stalled"|"ok", c: <code>, t: <epoch>,
@@ -565,10 +566,18 @@
 
     if (track.t) {
       name.textContent = track.t;
+    } else if (imported[track.k] && imported[track.k].x) {
+      /* Resolution was tried and answered with nothing. The id is now the most
+         honest thing available, so show it — and only here. An id on a row is
+         a statement that we asked and got no name back, which is why it takes
+         a recorded verdict rather than merely a missing title. */
+      name.textContent = track.i;
+      name.classList.add("is-unresolved");
     } else {
-      // Title not known yet. Say so, and show what IS known — never the bare
-      // id on its own, which reads as though the track is called that.
-      name.textContent = "Resolving \u2014 " + track.i;
+      /* Still resolving, or waiting on tomorrow's budget. Either way the id is
+         withheld: it would read as a track called that, and it would say the
+         lookup is over when it is not. */
+      name.textContent = "Resolving\u2026";
       name.classList.add("is-pending");
     }
     via.textContent = track.v ? "via " + track.v : "";
@@ -763,44 +772,82 @@
     } catch (e) { return {}; }
   }
 
-  /* The committed metadata sidecar.
+  /* Everything the resolve API has said this session, keyed like the imported
+   * records. A merge buffer, not a store: it is never persisted and never
+   * fetched, it exists so applyMeta() has one place to read from whether a
+   * record arrived from the bulk pass or a per-chunk backfill.
    *
-   * data/meta.json is produced by tools/resolve-meta.mjs on whichever machine
-   * has a YouTube API key, and committed. It exists so a key is needed in
-   * exactly one place, once: localStorage does not sync between workstations
-   * and a key does not belong in a URL, but the RESULTS are not secret and can
-   * simply travel with the repo.
-   *
-   * Consulted before anything asks YouTube, so a machine that has never seen a
-   * playlist still shows real titles and durations the moment it imports the
-   * sheet — no oEmbed calls, no cueing, no waiting. */
-  let metaSidecar = {};
+   * A committed data/meta.json used to be read in here, written by a tools
+   * script on whichever machine held a key. Removed when the API became the
+   * resolver: it returned exactly what the endpoint returns, it had to be
+   * regenerated and committed by hand to stay current, and it never once
+   * existed on disk. Its real advantage was costing no request, and resolved
+   * titles persisting in mash.imported.v1 already cover that. */
+  let metaKnown = {};
 
-  async function loadMetaSidecar() {
-    try {
-      const res = await fetch("data/meta.json", { cache: "no-store" });
-      if (!res.ok) return;
-      metaSidecar = (await res.json()) || {};
-    } catch (e) {
-      /* no sidecar, or running from file:// — everything still resolves the
-         slow way, which is the whole point of it being optional */
-    }
-    if (applyMeta()) { rebuildLibrary(); render(true); }
+  /* The daily resolution budget.
+   *
+   * A cap on ids sent to the resolve API in a day, counted here rather than at
+   * the endpoint. Two consequences, both deliberate.
+   *
+   * It is per browser, so it is a politeness ledger and not a guarantee — the
+   * same shape as the liveness ledger above. A global cap needs server-side
+   * state, which a Vercel function has none of without adding a key-value
+   * store, and the quota it would defend is not the thing at risk: videos.list
+   * bills ONE unit per call of up to 50 ids, so this cap is 200 calls and 200
+   * units against a 10,000-unit daily allowance, and the CDN answers a
+   * repeated id without spending anything at all.
+   *
+   * And running out is NOT a resolution failure. Those ids are still perfectly
+   * resolvable; we have stopped asking until tomorrow. A capped run therefore
+   * leaves its rows saying they are still resolving, and says why in the
+   * status line, rather than marking anything dead. */
+  const META_DAY_CAP = 10000;
+  let metaLedger = (() => {
+    const led = store.read(K_META, null);
+    return led && led.day === today() ? led : { day: today(), spent: 0 };
+  })();
+
+  function metaRemaining() {
+    if (metaLedger.day !== today()) metaLedger = { day: today(), spent: 0 };
+    return Math.max(0, META_DAY_CAP - metaLedger.spent);
   }
 
-  /** Fill imported records from the sidecar. Returns how many it changed. */
+  function spendMeta(n) {
+    metaRemaining();                    // rolls the day over if it has changed
+    metaLedger.spent += n;
+    store.write(K_META, metaLedger);
+  }
+
+  /** Say the daily limit is what stopped us, not a failure. */
+  function noteCapped(left) {
+    $("statNote").textContent =
+      `daily resolve limit reached \u00b7 ${left} waiting for tomorrow`;
+  }
+
+  /** Fill imported records from what the API has said. Returns how many it changed. */
   function applyMeta() {
     let n = 0;
     for (const [k, rec] of Object.entries(imported)) {
-      const m = metaSidecar[k];
+      const m = metaKnown[k];
       if (!m) continue;
       if (m.gone) {
         markLiveness(TRACKS.find((x) => x.k === k) || rec, "gone", 100, "api");
+        /* A definite negative from the most authoritative source there is, and
+           the one thing that licenses a row to show its bare id. Recorded on
+           the record itself so it survives a reload: an id on screen has to
+           mean "asked, and answered with nothing", never "still waiting", and
+           an in-memory set forgets which of the two it was. */
+        if (!rec.x) { rec.x = 1; metaFailed.add(k); n++; }
         continue;
       }
-      /* The verdict first. This used to sit below the short-circuit, so an
-         import that had already pre-filled its fields from the sidecar skipped
-         the check entirely and never recorded a single blocked track. */
+      /* The verdict before the short-circuit below, not after. It cost a
+         release to learn why: with the committed sidecar, records could already
+         carry their fields when the verdicts arrived, so a short-circuit here
+         recorded no blocked tracks at all. The API cannot arrive after the
+         records it wrote, so the order is now belt and braces — kept because
+         re-recording a verdict is idempotent and free, and because applyMeta
+         sweeps every imported record on every batch, not just that batch's. */
       if (m.e === false) {
         markLiveness(TRACKS.find((x) => x.k === k) || rec, "blocked", 150, "api");
       }
@@ -818,43 +865,79 @@
     return n;
   }
 
-  /* The resolve API — the middle tier.
+  /* The resolve API — the resolver.
    *
-   *   data/meta.json   committed, free, offline, zero requests
-   *   META_API         keyed, batched, cached; for ids the sidecar lacks
-   *   oEmbed + cueing  when neither is available
+   *   META_API         keyed, batched, cached. Always tried, always first.
+   *   oEmbed + cueing  only for ids it could not answer.
+   *
+   * It is not a tier among equals any more. One call carries title, channel,
+   * duration and embeddable for fifty ids; the keyless path is one request per
+   * title, knows no duration, and pays for each one with half a second of
+   * cueing a hidden player. So the API resolves the whole playlist and the
+   * keyless path is what is left when it cannot.
    *
    * Set META_API to a deployed server/api/resolve.js (see server/README.md).
-   * Empty means the tier is skipped entirely, which is the default: the app
-   * must keep working for anyone who never deploys one. */
+   * Empty falls back entirely, which still works and is still supported: the
+   * app must not require a deployment of anyone who forks it. */
   const META_API = (window.MASH_CONFIG || {}).metaApi || "";
   const META_API_BATCH = 50;        // videos.list maximum; the endpoint enforces it too
 
-  /** Ask the API about up to 50 ids. Resolves to a meta map, or null. */
+  /* Ask the API about up to 50 ids. Three outcomes, and they are not alike:
+   *
+   *   { map }      it answered
+   *   { capped }   today's budget is spent — the ids are fine, we stopped
+   *   null         it could not answer: down, out of quota, not deployed
+   *
+   * The middle one is why this stopped returning a bare map. null sends the
+   * caller to the keyless fallback, and falling back after hitting our own
+   * daily cap would go and resolve the very ids the cap exists to defer.
+   *
+   * The `capped` return here is a RACE guard, and only that. Both callers trim
+   * their batch to metaRemaining() before calling, so in a single resolver this
+   * branch is unreachable — but trimming and spending are not one step, and
+   * fillMeta() and resolveAllMeta() can be in flight together, so the batch a
+   * caller sized against the budget can be larger than what is left by the time
+   * it gets here. The mutation harness cannot reach it for the same reason it is
+   * hard to reach: it needs two resolvers interleaved at one point. */
   async function metaFromApi(ids) {
     if (!META_API || !ids.length) return null;
+    if (metaRemaining() < ids.length) return { capped: true };
+    /* Spent on the attempt, not the answer: a request that reached the
+       endpoint has already cost its quota even if the response never got
+       back to us. */
+    spendMeta(ids.length);
     try {
       const res = await fetch(META_API + "?ids=" + encodeURIComponent(ids.join(",")),
         { mode: "cors" });
       if (!res.ok) return null;     // 429 quota, 503 no key, 502 upstream — all fall through
-      return await res.json();
+      return { map: await res.json() };
     } catch (e) {
       return null;                  // not deployed, offline, blocked — same answer
     }
   }
 
-  /* Metadata backfill.
+  /* Metadata backfill — the per-chunk path, which is the keyless one.
    *
-   * A sheet can be any size — the one this was built against holds 2,007 ids —
-   * so fetching every title up front is both slow and rude. Instead every
-   * imported track starts titleless and is filled in on demand: the first
-   * screenful during the import, the rest as their rows come into view.
+   * With an endpoint the whole playlist is resolved at once by resolveAllMeta()
+   * and this fills the first screenful during the import so the list is never a
+   * wall of placeholders. Without one, every title costs its own request, so
+   * tracks are filled in on demand as their rows come into view: a sheet can be
+   * any size — the one this was built against holds 2,007 ids — and fetching
+   * every title up front would be both slow and rude.
    *
-   * A row that is still waiting shows its id in a muted "pending" style, which
-   * is honest about what is known, rather than putting the id where the title
-   * goes and looking like data. */
+   * A row whose lookup is still open reads "Resolving…" and shows no id. The id
+   * appears only once something has answered and had no name to give, because
+   * an id in the title slot otherwise reads as a track called that, and as an
+   * answer where there is none. */
   const metaPending = new Set();
-  const metaFailed = new Set();
+  /* Ids a source answered about and had nothing for. Seeded from the records
+     themselves, so a reload neither re-asks about a video YouTube has already
+     called gone, nor flickers its row back to "Resolving" on every load. */
+  const metaFailed = new Set(Object.keys(imported).filter((k) => imported[k].x));
+  /* Ids the API answered a batch for without resolving. Weaker than failed:
+     the keyless fallback has not had its turn yet, so these are struck off the
+     bulk API loop only and stay eligible for the per-chunk oEmbed pass. */
+  const metaApiSkip = new Set();
   let metaRunning = 0;
 
   async function fillMeta(keys, onProgress) {
@@ -867,17 +950,48 @@
        a hit here also spares the cue-based duration resolver. oEmbed below is
        one request per track and knows neither. */
     let viaApi = 0;
-    for (let i = 0; i < want.length && META_API; i += META_API_BATCH) {
-      const slice = want.slice(i, i + META_API_BATCH);
-      const map = await metaFromApi(slice.map((k) => imported[k].i));
-      if (!map) break;                        // unavailable: stop asking, use oEmbed
-      Object.assign(metaSidecar, map);
+    let capped = false;
+    for (let i = 0; i < want.length && META_API; ) {
+      /* Trimmed to what is left of the day, so a budget with room for less
+         than a full batch still resolves that much rather than nothing. */
+      const room = Math.min(META_API_BATCH, metaRemaining());
+      if (room <= 0) { capped = true; break; }
+      const slice = want.slice(i, i + room);
+      const res = await metaFromApi(slice.map((k) => imported[k].i));
+      if (!res) break;                        // unavailable: stop asking, use oEmbed
+      if (res.capped) { capped = true; break; }
+      Object.assign(metaKnown, res.map);
       viaApi += applyMeta();
-      slice.forEach((k) => { if (imported[k].t) metaPending.delete(k); });
+      /* Painted from `imported` directly, which is where applyMeta() wrote.
+         Deliberately not a rebuildLibrary() here: during an import the tracks
+         are not in a playlist yet, so deriving the library would drop them. */
+      slice.forEach((k) => {
+        if (imported[k].t) { metaPending.delete(k); paintRowMeta(k); }
+      });
+      /* By the slice, not by META_API_BATCH. The two are equivalent as it
+         happens — a trimmed batch spends the rest of the budget exactly, so the
+         next pass caps either way — but only one of them is obviously correct
+         without working that out, and the equivalence is not a property worth
+         depending on. */
+      i += slice.length;
       if (onProgress) onProgress(viaApi);
     }
 
-    const left = want.filter((k) => imported[k] && !imported[k].t);
+    /* metaFailed matters here, not just in `want` above: the API loop that
+       just ran can itself mark an id gone, and videos.list saying a video is
+       absent is not a question oEmbed gets to reopen. Without this an id the
+       endpoint had already settled went on to collect an oEmbed title, which
+       overwrote the verdict with a name. */
+    const left = want.filter((k) => imported[k] && !imported[k].t && !metaFailed.has(k));
+    /* Capped is not failed. The keyless fallback is for ids the endpoint could
+       not answer, not for ids we chose not to ask about today, so a capped run
+       stops here and leaves them exactly as they are. */
+    if (capped) {
+      left.forEach((k) => metaPending.delete(k));
+      store.write(K_IMPORT, imported);
+      noteCapped(left.length);
+      return viaApi;
+    }
     if (!left.length) { store.write(K_IMPORT, imported); return viaApi; }
 
     let done = 0, cursor = 0;
@@ -902,12 +1016,17 @@
              the unavailable count, HIDDEN mode and the replacement finder all
              pick it up from one round trip. */
           metaFailed.add(k);
+          /* Persisted on the record, like the API's own verdict: this is what
+             lets the row show its id instead of claiming to still be
+             resolving, and it has to survive a reload to mean that. */
+          if (imported[k]) imported[k].x = 1;
           /* `|| imported[k]` matters: the eager pass during an import runs
              before rebuildLibrary() has folded these into TRACKS, so a lookup
              there finds nothing and the verdict was silently dropped. The
              stored record carries the key, which is all markLiveness needs. */
           markLiveness(TRACKS.find((x) => x.k === k) || imported[k],
                        "gone", res.code || 404, "oembed");
+          paintRowMeta(k);
         }
         // no `gone` and no meta: the request never landed. Leave it for the
         // next render pass rather than recording a verdict nobody gave.
@@ -930,7 +1049,12 @@
     const rec = imported[key];
     const name = row.querySelector(".t-name");
     const via = row.querySelector(".t-via");
-    if (name) { name.textContent = rec.t; name.classList.remove("is-pending"); }
+    if (name) {
+      name.classList.remove("is-pending", "is-unresolved");
+      if (rec.t) name.textContent = rec.t;
+      else if (rec.x) { name.textContent = rec.i; name.classList.add("is-unresolved"); }
+      else { name.textContent = "Resolving\u2026"; name.classList.add("is-pending"); }
+    }
     if (via) via.textContent = rec.v ? "via " + rec.v : "";
   }
 
@@ -949,30 +1073,50 @@
 
   async function resolveAllMeta() {
     if (!META_API || bulkRunning) return 0;
+    /* Missing EITHER field, not just a title. One call carries both, and a
+       record left with an oEmbed title and no duration is the worst case there
+       is: it looks resolved, so nothing asks again, and the cue resolver then
+       spends half a second a track on durations this returns for free. */
     const need = () => Object.keys(imported)
-      .filter((k) => !imported[k].t && !metaFailed.has(k));
+      .filter((k) => (!imported[k].t || !imported[k].d) &&
+                     !metaFailed.has(k) && !metaApiSkip.has(k));
     if (!need().length) return 0;
 
     bulkRunning = true;
-    let done = 0;
+    let done = 0, capped = false, changed = 0;
     try {
       let batch;
-      while ((batch = need().slice(0, META_API_BATCH)).length) {
-        const map = await metaFromApi(batch.map((k) => imported[k].i));
-        if (!map) break;                  // endpoint down or out of quota
-        Object.assign(metaSidecar, map);
-        applyMeta();
-        /* Anything the endpoint did not answer for must be struck off, or this
-           loop asks for the same ids forever. */
-        batch.forEach((k) => { if (!imported[k].t) metaFailed.add(k); });
+      while ((batch = need().slice(0, Math.min(META_API_BATCH, metaRemaining()))).length) {
+        const res = await metaFromApi(batch.map((k) => imported[k].i));
+        if (!res) break;                  // endpoint down or unreachable
+        if (res.capped) { capped = true; break; }
+        Object.assign(metaKnown, res.map);
+        changed += applyMeta();
+        /* Anything the endpoint answered a batch for without resolving must be
+           struck off, or this loop asks for the same ids forever. Struck off
+           the API only: it is not a verdict, and the keyless fallback may yet
+           get a title for it as its row renders. */
+        batch.forEach((k) => {
+          if (!imported[k].t || !imported[k].d) metaApiSkip.add(k);
+        });
         done += batch.length;
         $("statNote").textContent = `resolving ${done}/${done + need().length}\u2026`;
       }
+      /* An empty batch with work still outstanding means the budget ran out
+         between calls rather than the endpoint failing. */
+      if (!capped && need().length && metaRemaining() <= 0) capped = true;
     } finally {
       bulkRunning = false;
       store.write(K_IMPORT, imported);
       const left = need().length;
-      $("statNote").textContent = left ? `${left} still unresolved` : `resolved ${done}`;
+      if (capped) noteCapped(left);
+      else $("statNote").textContent = left ? `${left} still unresolved` : `resolved ${done}`;
+      /* applyMeta() writes to `imported`, and TRACKS plus the rendered view
+         hold SEPARATE objects — so correcting a record is invisible until the
+         library is derived again. A fresh import got away with it because the
+         import rebuilds anyway; a returning session did not, and showed the old
+         oEmbed title over a record that had already been corrected on disk. */
+      if (changed) rebuildLibrary();
       render(true);
     }
     return done;
@@ -1015,8 +1159,11 @@
   let durRunning = false;
   const durFailed = new Set();        // ids the player refused; do not retry
 
+  /* `!t.x` matters: a record the API has already called gone has no duration
+     and never will, so without it the cue loop works through every dead track
+     in a playlist, spending a full player load each to be told 100. */
   const durNeeded = () => Object.values(imported)
-    .filter((t) => !t.d && !durFailed.has(t.k));
+    .filter((t) => !t.d && !t.x && !durFailed.has(t.k));
 
   function ensureDurPlayer() {
     if (durPlayer || !window.YT || !window.YT.Player) return durPlayer;
@@ -1199,12 +1346,12 @@
     }
     store.write(K_IMPORT, imported);
 
-    /* Before anything is asked of YouTube. If these ids were resolved on the
-       machine that has a key, this fills in every title and duration and
-       records the gone/blocked verdicts, and the oEmbed pass below then finds
-       nothing left to do. An earlier draft also pre-filled the records above
-       from the sidecar; that was the same work twice, and the mutation harness
-       showed it by failing to notice its removal. */
+    /* Before anything is asked of YouTube. Re-importing a sheet whose ids the
+       API already answered for this session fills them in from the merge
+       buffer, verdicts included, and the pass below then finds nothing to do.
+       An earlier draft also pre-filled the records above; that was the same
+       work twice, and the mutation harness showed it by failing to notice its
+       removal. */
     applyMeta();
 
     /* With an endpoint, the whole playlist resolves now — 50 ids a call, so
@@ -3071,7 +3218,6 @@
   render(true);
   // liveness first: it can reveal dead tracks, which is what makes the
   // replacements sidecar worth asking for at all
-  loadMetaSidecar();
   mergeOfflineLiveness().then(mergeReplacements);
   mergeReplacements();
   loadEqIndex();
