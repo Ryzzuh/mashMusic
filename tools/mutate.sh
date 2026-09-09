@@ -693,6 +693,14 @@ mut 'a capped run marks its waiting tracks failed' app.js \
       left.forEach((k) => metaPending.delete(k));' \
   tests/playlist.spec.js 'reported as waiting'
 
+# The total-remaining readout. Added when its test stopped sleeping at a fixed
+# 1200ms and started polling, to prove the rewrite still measures the sum rather
+# than merely waiting for any number to appear.
+mut 'total remaining counts the whole list, not what is still queued' app.js \
+  '    for (let i = inQueue ? pos + 1 : 0; i < state.order.length; i++) {' \
+  '    for (let i = 0; i < state.order.length; i++) {' \
+  tests/transport.spec.js 'still queued'
+
 # ------------------------------------------------- the peeling stage (QoL 10b)
 #
 # Expanded, the stage scrolls away with the page; it collapses and pins once half

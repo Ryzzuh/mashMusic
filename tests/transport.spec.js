@@ -213,20 +213,29 @@ test("the readouts count from the playing track's position", async ({ page }) =>
 
 test("total remaining matches the sum of what is still queued", async ({ page }) => {
   await page.locator(".trow").nth(10).click();
-  await page.waitForTimeout(1200);
 
-  const { shown, expected } = await page.evaluate(() => {
+  /* How far the readout is above the queued total. Before the click it is the
+     whole library, so this starts enormous and drops to the playing track's
+     remaining time once the selection lands. */
+  const overshoot = () => page.evaluate(() => {
     const parse = (s) => {
       const p = s.split(":").map(Number);
       return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
     };
     // everything after position 10, computed from the dataset independently
     const after = window.MASH_TRACKS.slice(11).reduce((n, t) => n + t.d, 0);
-    return { shown: parse(document.getElementById("mAllRemain").textContent), expected: after };
+    return parse(document.getElementById("mAllRemain").textContent) - after;
   });
-  // plus whatever is left of the playing track, which is at most its duration
-  expect(shown).toBeGreaterThanOrEqual(expected);
-  expect(shown).toBeLessThanOrEqual(expected + 700);
+
+  /* Polled, not slept at. This was a fixed 1200ms, which held while the click
+     only had to start playback, and stopped holding once the same click also
+     drove a scroll into view, a stage collapse and its 300ms transition — it
+     failed once in a full-suite run and never alone. The upper bound is the one
+     that waiting satisfies, so it is the one to poll; the lower bound cannot be
+     reached by waiting longer, because the readout only counts down. */
+  await expect.poll(overshoot, { timeout: 15_000 },
+    ).toBeLessThanOrEqual(700);          // at most the playing track's own length
+  expect(await overshoot()).toBeGreaterThanOrEqual(0);
 });
 
 test("the transport heart and the row heart stay in step", async ({ page }) => {
