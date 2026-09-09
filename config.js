@@ -11,4 +11,6 @@
  * for the same reason data/tracks.js is one. It does not overwrite an existing
  * value, so tests can set one before the page loads.
  */
-window.MASH_CONFIG = window.MASH_CONFIG || { metaApi: "" };
+window.MASH_CONFIG = window.MASH_CONFIG || {
+  metaApi: "https://mash-music-meta.vercel.app/api/resolve"
+};
