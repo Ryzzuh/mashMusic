@@ -95,24 +95,54 @@ resolver spending ~17 minutes on durations the same call returns.
 Anything the endpoint answers 200 for but omits must be struck off, or the loop
 asks for it again forever.
 
-Metadata resolves in three tiers, each falling through to the next:
-`data/meta.json` → the resolve API (`config.js` → `metaApi`, see
-`server/README.md`) → oEmbed and cueing. **Empty configuration is a supported
-state**, not a broken one: a visitor who deploys nothing still gets a working
-site. Deployment config lives in `config.js`, never in `app.js` — a constant
-there cannot be set by a test and forces an application edit to deploy.
+**The resolve API is the resolver** (`config.js` → `metaApi`, see
+`server/README.md`). It is asked first, always, for the whole playlist; oEmbed
+and cueing are what is left for ids it could not answer. **Empty configuration
+is still a supported state**, not a broken one: a visitor who deploys nothing
+falls back entirely and gets a working site. Deployment config lives in
+`config.js`, never in `app.js` — a constant there cannot be set by a test and
+forces an application edit to deploy.
 
-**`data/meta.json` is the keyed shortcut, and the reason no key is needed
-anywhere else.** `tools/resolve-meta.mjs` runs once on whichever machine has a
-YouTube API key — `videos.list`, 50 ids per call, 1 quota unit, returning
-title, channel, duration and `embeddable` together — and its output is
-committed. Every other workstation and every visitor then resolves instantly
-with no key. `localStorage` does not sync between machines and a key does not
-belong in a URL; the results are not secret, so they travel with the repo
-instead. The app consults it before asking YouTube anything, and applies its
-gone/blocked verdicts on **every** load, not only when a title changes.
+**The resolver owns the whole record, not just the title.** A record missing
+*either* a title or a duration is re-asked, because one call carries both. The
+case this exists for is a record left with an oEmbed title and `d: 0`: it looks
+resolved, so nothing asks again, and the cue resolver then spends half a second
+a track on durations `videos.list` returns for free.
 
-Everything below is the keyless fallback, used when the sidecar has no entry.
+**`applyMeta()` writes to `imported`; TRACKS and the rendered view hold separate
+objects.** Correcting a record is therefore invisible until `rebuildLibrary()`
+runs. A fresh import got away with it because importing rebuilds anyway; a
+returning session did not, and showed a stale oEmbed title over a record
+already corrected on disk.
+
+**A daily budget of 10,000 ids, in `mash.metabudget.v1`.** It is a politeness
+ledger, not a guarantee — per browser, like the liveness ledger. A global cap
+needs server-side state a Vercel function does not have, and the quota is not
+what is at risk: `videos.list` bills **one** unit per call of up to 50 ids, so
+the cap is 200 calls against a 10,000-*unit* allowance, and the CDN answers a
+repeated id for nothing.
+
+**Running out of budget is not a failed track**, and the code keeps the two
+apart deliberately. `metaFromApi()` returns `{capped}` distinctly from `null`,
+because `null` means "the endpoint could not answer" and sends the caller to
+the keyless fallback — which would resolve the very ids the cap exists to
+defer. A capped run leaves its rows saying they are still resolving and says
+why in the status line.
+
+**A row shows a bare id in exactly one case: resolution was tried and answered
+with nothing.** That verdict is persisted as `x: 1` on the imported record, not
+held in a set, so it survives a reload; otherwise a row would go back to
+claiming it was still resolving on every load. Anything else — in flight,
+unanswered, deferred to tomorrow — reads `Resolving…` and withholds the id,
+which would otherwise read both as a track named that and as a finished answer.
+
+There was a committed `data/meta.json` in front of the API, written by
+`tools/resolve-meta.mjs` on whichever machine held a key. **Both were removed**
+on 2026-09-09: it returned exactly what the endpoint returns, had to be
+regenerated and committed by hand to stay current, and never once existed on
+disk. See `DECISIONS.md`.
+
+Everything below is the keyless fallback, for ids the API could not answer.
 
 **Durations come from cueing, not playing.** oEmbed has none and `videos.list`
 needs a key, but the IFrame API reports a duration from a CUED video — nothing

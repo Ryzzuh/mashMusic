@@ -24,9 +24,12 @@ exercised at all.
   link per cell. One playlist is visible at a time. Four other import methods
   (paste a list, YouTube playlist URL, file upload, SoundCloud set) appear in
   the dialog, are selectable, and report that they are not built yet.
-- **Metadata resolution**, in three tiers, each falling through to the next:
-  `data/meta.json` (committed, does not exist yet), then the resolve API, then
-  YouTube oEmbed for titles plus a hidden cued player for durations.
+- **Metadata resolution through the resolve API**, which is now the resolver
+  rather than the middle of three tiers: the whole playlist goes through it,
+  fifty ids a call, up to a daily budget of 10,000 ids held in
+  `mash.metabudget.v1`. YouTube oEmbed for titles and a hidden cued player for
+  durations remain as the failure path, for ids it could not answer. The
+  committed `data/meta.json` tier and `tools/resolve-meta.mjs` were removed.
 - **The resolve API**, deployed at `https://mash-music-meta.vercel.app/api/resolve`
   and wired up in `/Users/Rhys/Projects/claude/mashmusic/config.js`. Verified
   live: returns title, channel, duration, thumbnail and `embeddable` for up to
@@ -45,11 +48,6 @@ has been kept, so this appears deliberate.
 
 **Untouched / never run:**
 
-- `data/meta.json` does not exist. `tools/resolve-meta.mjs` has never made a
-  `videos.list` call from this machine, because there is no `YOUTUBE_API_KEY`
-  here. Its Google Sheets half is verified end to end against a real
-  2,007-track sheet; only the keyed half is unproven locally. The same code
-  path *is* proven through the deployed API.
 - The **live spectrum has never run against a real screen capture.** Every test
   drives it with a synthetic `MediaStream` built from an oscillator, which
   exercises the real `AudioContext`, bin-to-band mapping and draw loop but not
@@ -99,8 +97,10 @@ nothing can later distinguish from a track genuinely named that.
 `localStorage` does not sync between machines and a key does not belong in a
 URL, so an in-app key field was rejected: it optimises for one machine, adds a
 settings surface for a single-user convenience, and does nothing for visitors.
-Two paths exist instead — `tools/resolve-meta.mjs` writing a committed
-`data/meta.json`, and the deployed resolve API.
+The deployed resolve API is the one path. A committed `data/meta.json`, written
+by a tools script on the machine with the key, was the other; it was removed on
+2026-09-09 because it returned exactly what the endpoint returns and never once
+existed on disk.
 
 **OAuth would not help, and the intuition that it would is wrong.** YouTube
 quota is charged to the Google Cloud *project*, never to the signed-in user, so
@@ -185,11 +185,9 @@ be caught by any test.
 | `index.html` | Markup, SVG symbol defs, dialogs. |
 | `data/tracks.js` | The 1,257-track library. A historical record; do not rewrite. |
 | `data/liveness.json` | Sidecar: ids the platforms have lost. Currently `{}`. |
-| `data/meta.json` | Sidecar: committed metadata. **Does not exist yet.** |
 | `server/api/resolve.js` | The Vercel function. Batches 50 ids per `videos.list` call. |
 | `server/resolve.test.mjs` | Handler tests — no network, no key. Beside `api/`, never inside it. |
 | `server/README.md` | Deploy steps, key restrictions, and what actually protects the endpoint. |
-| `tools/resolve-meta.mjs` | Writes `data/meta.json`. Needs a key. Never run. |
 | `tools/check-liveness.mjs` | Offline liveness. Resumable. Needs a key for the YouTube half. |
 | `tools/find-replacements.mjs` | YouTube replacement search. Never run; needs a key. |
 | `tools/build-envelopes.py` | Offline spectral analysis → the `mashMusic-eq` repository. |
@@ -233,10 +231,10 @@ be caught by any test.
 3. **Add a way to delete a playlist.** See Gotchas. A control on each entry in
    the playlist picker, removing the playlist and any imported tracks no other
    playlist still references.
-4. **Generate `data/meta.json`** by running
-   `YOUTUBE_API_KEY=... node tools/resolve-meta.mjs --sheet <url or id>` and
-   committing the result. Optional now that the resolve API is deployed, but it
-   is the only tier that costs nothing and works offline.
+4. **Consider whether the daily resolve cap should be enforced server-side.**
+   It is a per-browser politeness ledger today. A real global cap needs a
+   key-value store on the Vercel side, which was judged disproportionate for a
+   limit set at two percent of the quota allowance. See `DECISIONS.md`.
 5. **Populate liveness for the built-in library.** The `check N of M` control
    in the status bar needs no key: 25 tracks a click, 300 requests a day.
    `mash.liveness.v1` has never been populated for the 1,257 built-in tracks.
