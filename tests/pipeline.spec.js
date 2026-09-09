@@ -82,7 +82,7 @@ test("the resolve endpoint refuses everything it should", () => {
      that matter are the refusals — without strict id validation the endpoint
      is an open proxy that forwards anything to googleapis.com on the key's
      behalf. */
-  const out = execFileSync("node", ["server/api/resolve.test.mjs"],
+  const out = execFileSync("node", ["server/resolve.test.mjs"],
     { cwd: ROOT, encoding: "utf8", timeout: 30_000 });
   expect(out).toContain("ALL PASS");
   expect(out).not.toContain("FAIL");

@@ -98,8 +98,12 @@ extractable by anyone who can already read the endpoint URL.
 ## Tests
 
 ```bash
-node server/api/resolve.test.mjs
+node server/resolve.test.mjs
 ```
 
 Runs the handler directly with fake request/response objects: no network, no
 key, no Vercel. `tests/pipeline.spec.js` runs it too, so it cannot rot.
+
+It sits beside `api/`, not inside it, on purpose: Vercel deploys **every** file
+in `api/` as a function, so a test in there becomes a public endpoint and can
+fail the build for having no handler export.
