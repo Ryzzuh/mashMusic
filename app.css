@@ -1427,7 +1427,18 @@ main {
 
 /* stacked: give the spectrum a definite height instead of a ratio */
 @media (max-width: 860px) {
-  .stage-side { grid-template-rows: auto 88px; }
+  /* And undo the height:0/min-height:100% above, which is right for the
+     two-column layout and collapses this one to nothing.
+     
+     Up there the video sets the row height and the side column divides it, so
+     the column must not contribute a height of its own. Stacked, the side
+     column IS its own row: that 100% resolves against a row whose height is set
+     by a child declaring zero, and the whole thing goes to 0. The spectrum
+     survived on its explicit 88px; the text row is `auto`, and auto of nothing
+     is nothing — so `overflow: hidden` on .stage-meta clipped the source line,
+     the title and the contributor away entirely. On a phone you could not see
+     what was playing. */
+  .stage-side { grid-template-rows: auto 88px; height: auto; min-height: 0; }
 }
 @media (max-width: 620px) {
   .stage-side { grid-template-rows: auto 64px; }

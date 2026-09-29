@@ -413,6 +413,39 @@ test("the stage does not pin on a narrow viewport", async ({ page }) => {
   expect(await peelOf(page)).toBe(0);
 });
 
+test("the now-playing text is visible on a phone, not clipped to nothing", async ({ page }) => {
+  /* This shipped broken and nothing here caught it.
+
+     .stage-side carries `height: 0; min-height: 100%`, which is right for the
+     two-column layout: the video sets the row height and the side column
+     divides it without contributing one. Stacked, the side column IS its own
+     row, so that 100% resolves against a row whose height is set by a child
+     declaring zero, and the column collapses. .stage-meta has
+     `overflow: hidden`, so the source line, the title and the contributor were
+     clipped away completely — on a phone you could not see what was playing. */
+  await page.setViewportSize({ width: 390, height: 844 });
+  await settle(page);
+  await page.locator(".trow").first().click();
+  await settle(page);
+
+  const m = await page.evaluate(() => {
+    const box = (sel) => {
+      const b = document.querySelector(sel).getBoundingClientRect();
+      return { h: b.height, bottom: b.bottom };
+    };
+    return { meta: box(".stage-meta"), title: box(".np-title"), source: box(".np-source") };
+  });
+
+  expect(m.meta.h, "the text column must have a height at all").toBeGreaterThan(20);
+  expect(m.title.h, "and the title must be drawn").toBeGreaterThan(10);
+  /* Height alone is not enough: overflow:hidden clips without changing a rect,
+     so the child has to be inside the parent it is clipped by. */
+  expect(m.title.bottom, "the title must not be clipped away")
+    .toBeLessThanOrEqual(m.meta.bottom + 1);
+  expect(m.source.bottom, "nor the source line")
+    .toBeLessThanOrEqual(m.meta.bottom + 1);
+});
+
 test("reduced motion drops the collapse transition", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   expect(await page.evaluate(() =>

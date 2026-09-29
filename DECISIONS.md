@@ -6,6 +6,39 @@ to undo it.
 
 ---
 
+## 2026-09-29 — A phone never showed what was playing
+
+**Found by asking where the ad chip would appear.** It appears on the source
+line, and on a phone the source line was not drawn. Neither was the title, nor
+the contributor. The app had never shown what was playing on a phone, and this
+predates everything shipped this week.
+
+**The mechanism, and why it was right in one place and wrong in the other.**
+`.stage-side` carries `height: 0; min-height: 100%`. In the two-column layout
+that is correct and deliberate: the video sets the row height and the side
+column divides it with fr rows, so the column must not contribute a height of
+its own. Stacked, the side column IS its own row. That 100% then resolves
+against a row whose height is set by a child declaring zero, and the column
+collapses. The spectrum survived on its explicit 88px; the text row is `auto`,
+and auto of nothing is nothing. `.stage-meta` has `overflow: hidden`, so the
+text was clipped away rather than merely squashed.
+
+**Fix:** `height: auto; min-height: 0` on `.stage-side` inside the narrow
+breakpoint. One rule, undoing a trick that does not apply there.
+
+**Why no measurement caught it, which is the part worth keeping.**
+`getBoundingClientRect()` does not account for clipping by an ancestor's
+overflow. Probing the elements reported the title and the chip as sized,
+positioned and in the viewport, all true, while a screenshot of the same band
+showed empty space. A rect says where a box would be, not whether anyone can see
+it. The regression test therefore asserts two things: that the column has a
+height, and that the title and source sit INSIDE the parent that clips them.
+Either alone passes against the broken layout.
+
+**And screenshots are what found it.** Every number said the layout was fine.
+
+---
+
 ## 2026-09-29 — Muting an inferred ad
 
 **Asked for:** infer when an ad is playing and mute it, so a device on a table
