@@ -3431,10 +3431,29 @@
    * cannot see one. Prerolls are what a jukebox meets.
    *
    * It mutes and nothing else. The ad is fetched, played in full and counted. */
-  const AD_POLL = 250;
+  /* Tuned against real ads, and the numbers are why these values and not
+     rounder ones. Measured from the click:
+
+         embed startup before the clock moves at all   1.9 - 2.8s
+         waiting for the clock to pass the threshold   528ms at 0.5s
+         detection after that                          270 - 420ms
+
+     Two to three seconds of that is the embed and cannot be reduced by anything
+     here. The other two are ours and were costing about 900ms between them.
+
+     The threshold matters more than it looks: it is not 0.5s of wall clock, it
+     is 0.5s of the AD'S OWN duration, which is a tenth of a five-second ad. At
+     0.5 the chip landed at 3.8 - 5.8s and a short ad was over before it. 0.1 is
+     still unambiguously "not zero", which is the only thing it has to be — the
+     case it separates from is a dead load, where the clock never moves at all.
+
+     The poll costs up to a full interval per confirmation. 100ms of an O(1)
+     comparison against a value the player API already holds locally is not real
+     work; the interval only runs while something is playing. */
+  const AD_POLL = 100;
   const AD_CONFIRM = 2;              // consecutive samples before believing it
   const AD_GRACE = 600;              // ms after a load before the clock is trusted
-  const AD_CLOCK = 0.5;              // seconds of clock that count as "running"
+  const AD_CLOCK = 0.1;              // seconds of clock that count as "running"
   let adPending = 0;                 // consecutive samples that looked like an ad
   let adMuted = false;               // WE muted, as opposed to the reader
   let adTimer = 0;

@@ -46,8 +46,14 @@ async function fakePlayer(page) {
         setTimeout(() => events.onReady && events.onReady({ target: this }), 0);
       },
     };
-    /* An ad: the clock advances while the player stays silent about starting. */
-    window.__adRuns = (secs) => { window.__p.clock = secs; };
+    /* An ad: the clock advances while the player stays silent about starting.
+       Cancels any pending reset from a load. Three separate tests have now been
+       broken by that timer firing later and zeroing a clock the test had set —
+       a clock set explicitly is the test taking control, and it must win. */
+    window.__adRuns = (secs) => {
+      clearTimeout(window.__p.resetAt);
+      window.__p.clock = secs;
+    };
     /* The track itself beginning, clock back to zero. */
     window.__trackStarts = () => {
       window.__p.clock = 0;
