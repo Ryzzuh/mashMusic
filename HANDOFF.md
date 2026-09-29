@@ -223,11 +223,20 @@ be caught by any test.
   track plays so a phone left alone does not put itself into that state — those
   two are the parts that ARE ours. Measured 2026-09-27, diagnosed in
   `DECISIONS.md`.
-- **A page cannot request the browser's "desktop site" mode**, and there is no
-  API, header or meta tag for it. Both mobile browsers remember it per site, so
-  it is set once from the browser's own settings. Widening the viewport meta
-  would change layout only, not the user agent and not any media policy, and it
+- **Desktop site mode STOPS the embed pausing.** Measured on the phone,
+  2026-09-29: with it on, switching apps and minimising both leave playback
+  running. That pins the mechanism down — desktop mode changes the user agent
+  for the tab and its subframes and nothing else relevant, so the pause is user
+  agent gated. YouTube's embed serves a phone different behaviour, and it is not
+  the Page Visibility API.
+  **A page cannot request that mode**: no API, no header, no meta tag, by
+  design. Both mobile browsers remember it per site, so it is a setting the
+  reader makes once and keeps. Widening the viewport meta is not a substitute —
+  it changes layout only, not the user agent and not any media policy, and it
   would drop a phone above the 860px breakpoint into the peeling stage.
+  Consequence for the wake lock: for a reader in desktop mode it is redundant,
+  because the page going hidden no longer stops anything, and it still costs
+  screen-on battery. It remains the right default for everyone else.
 
 - **A merge to `main` deploys.** GitHub Pages builds from `main`.
 - **There are no CI checks on this repository.** The only evidence behind any
