@@ -500,6 +500,7 @@
       playingFlag = v;
       syncWakeLock();
       paintBgTip();
+      syncAdWatch();
     }
   };
 
@@ -1602,6 +1603,10 @@
        SoundCloud track to a YouTube one changes the answer without changing
        whether anything is playing, so the setter never fires. */
     paintBgTip();
+    /* And clear any ad inference outright: for a moment after loadVideoById the
+       player still reports the previous track, which is a mismatch that means
+       nothing. */
+    adClear();
   }
 
   let pendingYT = null;
@@ -3398,6 +3403,82 @@
     } finally {
       wakePending = false;
     }
+  }
+
+  /* Mute an ad.
+   *
+   * The player has no ad API. Enumerated against the real one: 73 methods, not
+   * one of them about ads, `getOptions()` empty, and no ad state among the six
+   * player states. The only ad-named method is `logImaAdEvent`, which reports
+   * INTO the ad system rather than telling us anything.
+   *
+   * What it does have is `getVideoData()`, which reports the id of the video
+   * actually on screen. During an ad that is the ad's id and not the one we
+   * asked for. That mismatch is the whole inference.
+   *
+   * This MUTES. It does not skip and does not block: the ad is fetched, played
+   * in full and counted. A reader would otherwise reach for the volume, and the
+   * point here is a device left on a table that nobody wants to pick up.
+   *
+   * `getVideoData` is undocumented, so every read is guarded and the failure
+   * mode is silence — if the field changes or goes away, nothing is inferred and
+   * nothing is muted. It cannot start muting the wrong thing by breaking.
+   *
+   * Debounced, because `loadVideoById()` leaves the PREVIOUS track's id reported
+   * for a moment: a single sample reads a track change as an ad. play() clears
+   * the count outright so a change never accumulates one at all. The cost is
+   * that roughly half a second of an ad is audible before the mute lands.
+   *
+   * NOT VERIFIED AGAINST A REAL AD. Ads do not serve reliably to an automated
+   * browser, so the tests drive the inference with a fake player and the live
+   * trigger is unproven. The guards are written so that the untested direction
+   * is the harmless one. */
+  const AD_POLL = 250;
+  const AD_CONFIRM = 2;              // consecutive samples before believing it
+  let adMismatch = 0;
+  let adMuted = false;               // WE muted, as opposed to the reader
+  let adTimer = 0;
+
+  function paintAd() {
+    const el = $("npAd");
+    if (el) el.hidden = !adMuted;
+  }
+
+  /** Stop believing an ad is on, and hand back a mute we took. */
+  function adClear() {
+    adMismatch = 0;
+    if (!adMuted) return;
+    adMuted = false;
+    /* Only if it is still muted. A reader who unmuted during the ad has said
+       what they want, and putting it back would argue with them. */
+    try { if (yt && yt.unMute && yt.isMuted && yt.isMuted()) yt.unMute(); } catch (e) {}
+    paintAd();
+  }
+
+  function adWatch() {
+    if (!ytReady || !yt || !state.playing ||
+        !state.current || state.current.s !== "YT") return adClear();
+    /* No separate check that getVideoData exists: calling an absent one throws,
+       and this catch already lands on exactly the same adClear(). The guard was
+       there and was removed, because a mutation could not tell it from nothing. */
+    let showing;
+    try { showing = (yt.getVideoData() || {}).video_id; } catch (e) { return adClear(); }
+    if (!showing) return;                        // between videos; decide nothing
+    if (showing === state.current.i) return adClear();
+    if (++adMismatch < AD_CONFIRM || adMuted) return;
+    try {
+      /* Already muted by the reader: leave it. Taking a mute we did not make and
+         handing it back later is a change nobody asked for. */
+      if (yt.isMuted && yt.isMuted()) return;
+      yt.mute();
+      adMuted = true;
+      paintAd();
+    } catch (e) { /* leave the player alone */ }
+  }
+
+  function syncAdWatch() {
+    if (state.playing && !adTimer) adTimer = setInterval(adWatch, AD_POLL);
+    if (!state.playing && adTimer) { clearInterval(adTimer); adTimer = 0; adClear(); }
   }
 
   /* The one honest thing the page can say about background playback on a phone.

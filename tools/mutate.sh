@@ -752,6 +752,42 @@ mut 'the capture takes Chrome voice processing defaults' app.js \
   '          /* removed */' \
   tests/liveeq.spec.js 'not for a voice call'
 
+# ------------------------------------------------------------- muting an ad
+#
+# Inferred from getVideoData() reporting an id we did not ask for. Undocumented,
+# so the guards matter more than the happy path: every one of these makes the
+# feature act on less certainty than it should.
+
+mut 'an inferred ad is not muted at all' app.js \
+  '      yt.mute();
+      adMuted = true;' \
+  '      adMuted = true;' \
+  tests/ads.spec.js 'an ad is muted'
+
+mut 'the mute is never handed back' app.js \
+  '    try { if (yt && yt.unMute && yt.isMuted && yt.isMuted()) yt.unMute(); } catch (e) {}' \
+  '    try { void 0; } catch (e) {}' \
+  tests/ads.spec.js 'an ad is muted'
+
+# Taking a mute the reader made, and handing it back later, is a change nobody
+# asked for and one they cannot attribute.
+mut "the reader's own mute is taken over" app.js \
+  '      if (yt.isMuted && yt.isMuted()) return;' \
+  '      if (false) return;' \
+  tests/ads.spec.js 'reader made is left alone'
+
+# loadVideoById leaves the previous id reported for a moment. Without the
+# debounce that reads as an ad on every single track change.
+mut 'one sample is enough to believe an ad is running' app.js \
+  '    if (++adMismatch < AD_CONFIRM || adMuted) return;' \
+  '    if (adMuted) return;' \
+  tests/ads.spec.js 'not mistaken for an ad'
+
+mut 'stopping mid-ad leaves the player muted forever' app.js \
+  '    if (!state.playing && adTimer) { clearInterval(adTimer); adTimer = 0; adClear(); }' \
+  '    if (!state.playing && adTimer) { clearInterval(adTimer); adTimer = 0; }' \
+  tests/ads.spec.js 'hands the mute back'
+
 # ------------------------------------------------ the background-playback tip
 
 mut 'the tip is shown at every width, not just on a phone' app.js \

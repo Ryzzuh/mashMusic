@@ -6,6 +6,59 @@ to undo it.
 
 ---
 
+## 2026-09-29 — Muting an inferred ad
+
+**Asked for:** infer when an ad is playing and mute it, so a device on a table
+does not have to be picked up.
+
+**The player has no ad API, and that was verified rather than assumed.**
+Enumerated against the real one: 73 methods, none about ads, `getOptions()`
+empty, no ad state among the six player states. The only ad-named method is
+`logImaAdEvent`, which reports INTO the ad system.
+
+**What it does have is `getVideoData()`**, reporting the id of the video
+actually on screen. During an ad that is the ad's id, not the one we asked for.
+That mismatch is the whole inference, and it is a far better signal than the
+duration heuristic first floated here — that one infers from an arithmetic
+coincidence, this one from the player naming what it is showing.
+
+**It mutes. It does not skip and does not block.** The ad is fetched, played in
+full and counted. What changes is that nobody reaches for the volume.
+
+**Undocumented, so the failure mode is silence.** Every read is guarded and every
+uncertain case does nothing. If the field changes or goes away the read throws,
+the catch clears, and nothing is ever muted. It cannot begin muting the wrong
+thing by breaking.
+
+**Debounced by two samples.** `loadVideoById()` leaves the previous track's id
+reported for a moment, so one sample reads every track change as an ad.
+`play()` also clears the count outright. The cost is about half a second of
+audible ad before the mute lands.
+
+**A mute the reader made is never taken over**, and never handed back. They have
+no way to tell where a mute came from, so arguing with one is worse than leaving
+an ad audible.
+
+**NOT VERIFIED AGAINST A REAL AD.** Ads do not serve reliably to an automated
+browser. The tests drive the inference with a fake player, so the live trigger
+is unproven; the guards are written so that the untested direction is the
+harmless one.
+
+**Two more tests that proved nothing, both caught by the harness.**
+
+- The debounce's mutation went undetected because the fake player swapped its
+  reported id instantly, so the track-change window the debounce exists for did
+  not exist in the test at all. The fake now lags 200ms, deliberately under the
+  250ms poll so exactly one sample can fall inside it whatever the phase.
+- A guard checking `getVideoData` exists could not be caught, because the
+  try/catch below lands on the identical path. Redundant, and deleted. The test
+  stays: it proves the absent-field case is safe by the route that handles it.
+
+Third time this session an uncatchable mutation meant dead code rather than a
+weak test. Measure before blaming the test.
+
+---
+
 ## 2026-09-29 — Naming the browser setting that fixes background playback
 
 **Established first:** the embed's pause is user agent gated. With the browser's

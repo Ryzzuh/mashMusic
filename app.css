@@ -643,6 +643,21 @@ main {
   min-width: 0;
 }
 
+/* Shown while an ad is inferred and the player has been muted for it. Lives on
+   the source row because that row renders identically in both stage modes, and
+   because silence with no explanation is worse than the ad. */
+.np-ad {
+  flex: none;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: var(--r);
+  padding: 2px 7px;
+}
+
 .np-source {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 10.5px;
