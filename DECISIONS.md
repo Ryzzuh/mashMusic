@@ -6,6 +6,146 @@ to undo it.
 
 ---
 
+## 2026-09-29 — Muting an inferred ad
+
+**Asked for:** infer when an ad is playing and mute it, so a device on a table
+does not have to be picked up.
+
+**The player has no ad API, and that was verified rather than assumed.**
+Enumerated against the real one: 73 methods, none about ads, `getOptions()`
+empty, no ad state among the six player states. The only ad-named method is
+`logImaAdEvent`, which reports INTO the ad system.
+
+**What it does have is `getVideoData()`**, reporting the id of the video
+actually on screen. During an ad that is the ad's id, not the one we asked for.
+That mismatch is the whole inference, and it is a far better signal than the
+duration heuristic first floated here — that one infers from an arithmetic
+coincidence, this one from the player naming what it is showing.
+
+**It mutes. It does not skip and does not block.** The ad is fetched, played in
+full and counted. What changes is that nobody reaches for the volume.
+
+**Undocumented, so the failure mode is silence.** Every read is guarded and every
+uncertain case does nothing. If the field changes or goes away the read throws,
+the catch clears, and nothing is ever muted. It cannot begin muting the wrong
+thing by breaking.
+
+**Debounced by two samples.** `loadVideoById()` leaves the previous track's id
+reported for a moment, so one sample reads every track change as an ad.
+`play()` also clears the count outright. The cost is about half a second of
+audible ad before the mute lands.
+
+**A mute the reader made is never taken over**, and never handed back. They have
+no way to tell where a mute came from, so arguing with one is worse than leaving
+an ad audible.
+
+**NOT VERIFIED AGAINST A REAL AD.** Ads do not serve reliably to an automated
+browser. The tests drive the inference with a fake player, so the live trigger
+is unproven; the guards are written so that the untested direction is the
+harmless one.
+
+**Two more tests that proved nothing, both caught by the harness.**
+
+- The debounce's mutation went undetected because the fake player swapped its
+  reported id instantly, so the track-change window the debounce exists for did
+  not exist in the test at all. The fake now lags 200ms, deliberately under the
+  250ms poll so exactly one sample can fall inside it whatever the phase.
+- A guard checking `getVideoData` exists could not be caught, because the
+  try/catch below lands on the identical path. Redundant, and deleted. The test
+  stays: it proves the absent-field case is safe by the route that handles it.
+
+Third time this session an uncatchable mutation meant dead code rather than a
+weak test. Measure before blaming the test.
+
+---
+
+## 2026-09-29 — Naming the browser setting that fixes background playback
+
+**Established first:** the embed's pause is user agent gated. With the browser's
+desktop-site setting on, switching apps and minimising both leave playback
+running. Measured on the phone. That reverses an earlier conclusion in this file
+that the Page Visibility API was the mechanism; it is not.
+
+**A page cannot request that mode** — no API, no header, no meta tag, by design.
+So the only honest move is to name the setting, which is what the tip does.
+
+**Shown only where it is both true and actionable:** a narrow viewport and a
+YouTube track actually playing. SoundCloud never stops, so saying it there is
+noise. Dismissed permanently, in prefs, because a tip that returns is a nag.
+
+**It retires itself.** A reader who takes the advice reports a desktop-width
+viewport from then on, so the narrow-viewport condition stops matching. Nothing
+has to detect that it worked.
+
+**Fixed rather than in flow**, for the same reason the status bar is: nothing may
+shift the stage, whose height and offset the suite measures to the pixel.
+
+**Three things the mutation harness caught, and the third is the interesting
+one.**
+
+- Switching from a SoundCloud track to a YouTube one left the tip hidden. That
+  changes the answer without changing whether anything is playing, so the
+  `state.playing` accessor never fires. `play()` paints too, now, with a test.
+- Dismissal was not persisted in the first draft.
+- **A padding rule added "to make room" for the tip did nothing at all.** Its
+  mutation could not be caught, which prompted measuring rather than weakening
+  the test: without the rule the last row still clears the tip by 37px at 360px
+  wide and 44px at 700px, because the clearance below the listing already
+  existed. The rule and the attribute driving it were deleted. The overlap test
+  was kept as a guard against the tip growing a line, and says in its comment
+  that no code of ours keeps it true — so a later reader does not mistake it for
+  evidence.
+
+The general lesson, and it is the second time this session: a mutation that
+cannot be caught is more often dead code than a weak test. Measure before
+assuming the test is at fault.
+
+---
+
+## 2026-09-29 — A screen wake lock while a track plays
+
+**Asked for:** keep the phone from sleeping, automatic while a track plays
+rather than a toggle.
+
+**Why it belongs to the same problem.** A jukebox gets put down. The screen
+dims, the phone locks, the page goes hidden, and the YouTube embed pauses
+itself — the same pause as tabbing away, reached by leaving the phone alone. A
+screen wake lock holds the page visible, which is the condition the embed needs.
+
+**Held only while something plays.** This asks a device to stay awake and that
+is not worth spending on a paused track. It is also why automatic beat a toggle:
+the condition is already known, so a switch would only be a way to get it wrong.
+
+**Re-acquired on every return to visibility.** The platform releases the lock
+whenever the page hides and does not hand it back. A version that requests once
+and assumes it still holds looks correct until somebody leaves, then fails
+silently. There is a mutation check for exactly that.
+
+**`state.playing` became an accessor.** Seven places assign it — two player
+callbacks each for YouTube and SoundCloud, `play()`, and the transport buttons —
+and a rule enforced at seven call sites is a rule waiting for an eighth. Same
+reasoning as `buildView()` owning every filter. Reversing it means putting a
+`syncWakeLock()` call at all seven and accepting that the eighth will miss it.
+
+**Two of my own tests passed for the wrong reason, and the harness caught both.**
+Worth recording because neither was obvious and both are the same species.
+
+- "Nothing is held while nothing is playing" asserted a request count of zero
+  after a wait. But `syncWakeLock()` only runs when something asks it to, so an
+  idle page never evaluates its condition, and the assertion was true whatever
+  the condition said. It passed against a version that held the screen on for
+  the life of the page. It now does a visibility round trip so the condition is
+  actually reached.
+- "A lock the platform revoked is not believed held" counted requests. Holding a
+  dead handle reaches the same request count by a different route: release the
+  stale one on the way out, request a fresh one on the way back. The tell is the
+  RELEASE count — nothing was held, so nothing should have been released.
+
+The lesson both share: a count that the correct and broken paths both arrive at
+is not evidence, and "the number matched" is the easiest way to miss that.
+
+---
+
 ## 2026-09-29 — Resume on return, and what the phone actually proved
 
 **Reported:** on a phone, tabbing out of the window stops the player.

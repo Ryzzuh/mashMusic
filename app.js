@@ -112,7 +112,8 @@
   );
   if (!sources.size) ALL_SOURCES.forEach((x) => sources.add(x));   // same guard as the click path
 
-  const prefs = Object.assign({ skin: "jukebox", listMode: "show", stagePinned: false },
+  const prefs = Object.assign({ skin: "jukebox", listMode: "show", stagePinned: false,
+                                bgTipSeen: false },
                               store.read(K_PREF, {}));
 
   // --------------------------------------------------------------- playlists
@@ -478,6 +479,7 @@
 
   // ------------------------------------------------------------------- view
 
+  let playingFlag = false;
   const state = {
     query: "",
     favsOnly: false,
@@ -487,7 +489,19 @@
     order: [],       // indices into view; identity unless shuffled
     shown: 0,
     current: null,   // track object
-    playing: false
+    /* An accessor, not a field, so the screen wake lock cannot drift out of
+       step with it. Seven places set this — two player callbacks each for
+       YouTube and SoundCloud, play(), and the transport buttons — and a rule
+       enforced at seven call sites is a rule waiting for an eighth. Same reason
+       buildView() owns every filter. */
+    get playing() { return playingFlag; },
+    set playing(v) {
+      if (v === playingFlag) return;
+      playingFlag = v;
+      syncWakeLock();
+      paintBgTip();
+      syncAdWatch();
+    }
   };
 
   function buildView() {
@@ -1585,6 +1599,14 @@
       playSC(track);
       if (yt && ytReady) yt.pauseVideo();
     }
+    /* Also here, not only from the state.playing setter: switching from a
+       SoundCloud track to a YouTube one changes the answer without changing
+       whether anything is playing, so the setter never fires. */
+    paintBgTip();
+    /* And clear any ad inference outright: for a moment after loadVideoById the
+       player still reports the previous track, which is a mismatch that means
+       nothing. */
+    adClear();
   }
 
   let pendingYT = null;
@@ -3207,7 +3229,11 @@
      expanded height is a function of the width, so a stale peel puts the
      threshold in the wrong place. */
   window.addEventListener("resize", () => { measureStage(); updateStageCollapse(); });
-  WIDE.addEventListener("change", () => { measureStage(); updateStageCollapse(); });
+  WIDE.addEventListener("change", () => {
+    measureStage();
+    updateStageCollapse();
+    paintBgTip();                    // crossing the breakpoint changes the answer
+  });
   pinBtn.setAttribute("aria-pressed", String(stageLocked));
   pinBtn.addEventListener("click", () => {
     stageLocked = !stageLocked;
@@ -3333,6 +3359,157 @@
   paintPlaylist();
   // Picks up where a previous session left off; no-ops when nothing is missing.
   resolveAllMeta().then(resolveDurations);
+  /* Keep the screen on while something is playing.
+   *
+   * A jukebox gets put down. The screen dims, the phone locks, the page goes
+   * hidden, and the YouTube embed pauses itself — the same pause as tabbing
+   * away, reached by leaving the phone alone instead. A screen wake lock holds
+   * the page visible, which is the condition the embed needs.
+   *
+   * Held only while something plays, never for the life of the page. This asks
+   * a device to stay awake and that is not worth spending on a paused track.
+   *
+   * RE-ACQUIRED on every return to visibility, because the platform takes the
+   * lock back whenever the page hides and does not hand it over again. A
+   * version that requests once and assumes it still holds is the standard way
+   * to get this wrong, and it fails silently.
+   *
+   * Every path is guarded and none of the failures are surfaced. The request
+   * rejects on a browser without the API (Safari before 16.4), on a hidden
+   * document, and on some devices when the battery is low. In all of those the
+   * page behaves exactly as it did before any of this existed. */
+  let wakeLock = null;
+  let wakePending = false;
+
+  async function syncWakeLock() {
+    if (wakePending) return;                 // a request is already in flight
+    const want = state.playing && !document.hidden;
+    if (want === !!wakeLock) return;
+    wakePending = true;
+    try {
+      if (want) {
+        if (!("wakeLock" in navigator)) return;
+        wakeLock = await navigator.wakeLock.request("screen");
+        /* The platform can take it back on its own. Forget the handle when it
+           does, so the next sync asks again instead of believing a dead one. */
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      } else {
+        const held = wakeLock;
+        wakeLock = null;
+        await held.release();
+      }
+    } catch (e) {
+      wakeLock = null;                       // unsupported, hidden, or refused
+    } finally {
+      wakePending = false;
+    }
+  }
+
+  /* Mute an ad.
+   *
+   * The player has no ad API. Enumerated against the real one: 73 methods, not
+   * one of them about ads, `getOptions()` empty, and no ad state among the six
+   * player states. The only ad-named method is `logImaAdEvent`, which reports
+   * INTO the ad system rather than telling us anything.
+   *
+   * What it does have is `getVideoData()`, which reports the id of the video
+   * actually on screen. During an ad that is the ad's id and not the one we
+   * asked for. That mismatch is the whole inference.
+   *
+   * This MUTES. It does not skip and does not block: the ad is fetched, played
+   * in full and counted. A reader would otherwise reach for the volume, and the
+   * point here is a device left on a table that nobody wants to pick up.
+   *
+   * `getVideoData` is undocumented, so every read is guarded and the failure
+   * mode is silence — if the field changes or goes away, nothing is inferred and
+   * nothing is muted. It cannot start muting the wrong thing by breaking.
+   *
+   * Debounced, because `loadVideoById()` leaves the PREVIOUS track's id reported
+   * for a moment: a single sample reads a track change as an ad. play() clears
+   * the count outright so a change never accumulates one at all. The cost is
+   * that roughly half a second of an ad is audible before the mute lands.
+   *
+   * NOT VERIFIED AGAINST A REAL AD. Ads do not serve reliably to an automated
+   * browser, so the tests drive the inference with a fake player and the live
+   * trigger is unproven. The guards are written so that the untested direction
+   * is the harmless one. */
+  const AD_POLL = 250;
+  const AD_CONFIRM = 2;              // consecutive samples before believing it
+  let adMismatch = 0;
+  let adMuted = false;               // WE muted, as opposed to the reader
+  let adTimer = 0;
+
+  function paintAd() {
+    const el = $("npAd");
+    if (el) el.hidden = !adMuted;
+  }
+
+  /** Stop believing an ad is on, and hand back a mute we took. */
+  function adClear() {
+    adMismatch = 0;
+    if (!adMuted) return;
+    adMuted = false;
+    /* Only if it is still muted. A reader who unmuted during the ad has said
+       what they want, and putting it back would argue with them. */
+    try { if (yt && yt.unMute && yt.isMuted && yt.isMuted()) yt.unMute(); } catch (e) {}
+    paintAd();
+  }
+
+  function adWatch() {
+    if (!ytReady || !yt || !state.playing ||
+        !state.current || state.current.s !== "YT") return adClear();
+    /* No separate check that getVideoData exists: calling an absent one throws,
+       and this catch already lands on exactly the same adClear(). The guard was
+       there and was removed, because a mutation could not tell it from nothing. */
+    let showing;
+    try { showing = (yt.getVideoData() || {}).video_id; } catch (e) { return adClear(); }
+    if (!showing) return;                        // between videos; decide nothing
+    if (showing === state.current.i) return adClear();
+    if (++adMismatch < AD_CONFIRM || adMuted) return;
+    try {
+      /* Already muted by the reader: leave it. Taking a mute we did not make and
+         handing it back later is a change nobody asked for. */
+      if (yt.isMuted && yt.isMuted()) return;
+      yt.mute();
+      adMuted = true;
+      paintAd();
+    } catch (e) { /* leave the player alone */ }
+  }
+
+  function syncAdWatch() {
+    if (state.playing && !adTimer) adTimer = setInterval(adWatch, AD_POLL);
+    if (!state.playing && adTimer) { clearInterval(adTimer); adTimer = 0; adClear(); }
+  }
+
+  /* The one honest thing the page can say about background playback on a phone.
+   *
+   * The embed's pause is USER AGENT gated. Measured on a phone, 2026-09-29:
+   * with the browser's desktop-site setting on, switching apps and minimising
+   * both leave playback running. A page cannot request that mode — no API, no
+   * header, no meta tag, by design — so naming the setting is the whole of what
+   * is available to us.
+   *
+   * Shown only where it is both true and actionable: a narrow viewport, and a
+   * YouTube track actually playing. SoundCloud never stops, so saying it there
+   * would be noise. And a reader who takes the advice reports a desktop-width
+   * viewport from then on, so the tip retires itself without needing to detect
+   * that it worked.
+   *
+   * Dismissed for good, in prefs. A tip that comes back is a nag. */
+  function paintBgTip() {
+    const el = $("bgTip");
+    if (!el) return;
+    const want = !prefs.bgTipSeen && !WIDE.matches &&
+      state.playing && !!state.current && state.current.s === "YT";
+    el.hidden = !want;
+  }
+
+  $("bgTipX").addEventListener("click", () => {
+    prefs.bgTipSeen = true;
+    store.write(K_PREF, prefs);
+    paintBgTip();
+  });
+
   /* Resume where it stopped, when the tab comes back.
    *
    * The YouTube embed pauses ITSELF when the page is hidden. That is its own
@@ -3366,6 +3543,10 @@
   let playingWhenHidden = false;
 
   document.addEventListener("visibilitychange", () => {
+    /* Both directions. Going away, this drops the lock explicitly rather than
+       trusting the platform's own release to have fired; coming back, it takes
+       one again, because the platform does not give it back. */
+    syncWakeLock();
     if (document.hidden) {
       playingWhenHidden = state.playing && !!state.current;
       return;

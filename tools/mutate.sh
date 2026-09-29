@@ -752,6 +752,98 @@ mut 'the capture takes Chrome voice processing defaults' app.js \
   '          /* removed */' \
   tests/liveeq.spec.js 'not for a voice call'
 
+# ------------------------------------------------------------- muting an ad
+#
+# Inferred from getVideoData() reporting an id we did not ask for. Undocumented,
+# so the guards matter more than the happy path: every one of these makes the
+# feature act on less certainty than it should.
+
+mut 'an inferred ad is not muted at all' app.js \
+  '      yt.mute();
+      adMuted = true;' \
+  '      adMuted = true;' \
+  tests/ads.spec.js 'an ad is muted'
+
+mut 'the mute is never handed back' app.js \
+  '    try { if (yt && yt.unMute && yt.isMuted && yt.isMuted()) yt.unMute(); } catch (e) {}' \
+  '    try { void 0; } catch (e) {}' \
+  tests/ads.spec.js 'an ad is muted'
+
+# Taking a mute the reader made, and handing it back later, is a change nobody
+# asked for and one they cannot attribute.
+mut "the reader's own mute is taken over" app.js \
+  '      if (yt.isMuted && yt.isMuted()) return;' \
+  '      if (false) return;' \
+  tests/ads.spec.js 'reader made is left alone'
+
+# loadVideoById leaves the previous id reported for a moment. Without the
+# debounce that reads as an ad on every single track change.
+mut 'one sample is enough to believe an ad is running' app.js \
+  '    if (++adMismatch < AD_CONFIRM || adMuted) return;' \
+  '    if (adMuted) return;' \
+  tests/ads.spec.js 'not mistaken for an ad'
+
+mut 'stopping mid-ad leaves the player muted forever' app.js \
+  '    if (!state.playing && adTimer) { clearInterval(adTimer); adTimer = 0; adClear(); }' \
+  '    if (!state.playing && adTimer) { clearInterval(adTimer); adTimer = 0; }' \
+  tests/ads.spec.js 'hands the mute back'
+
+# ------------------------------------------------ the background-playback tip
+
+mut 'the tip is shown at every width, not just on a phone' app.js \
+  '    const want = !prefs.bgTipSeen && !WIDE.matches &&' \
+  '    const want = !prefs.bgTipSeen &&' \
+  tests/resume.spec.js 'not shown on a desktop-width viewport'
+
+mut 'the tip is shown for SoundCloud, which never stops' app.js \
+  '      state.playing && !!state.current && state.current.s === "YT";' \
+  '      state.playing && !!state.current;' \
+  tests/resume.spec.js 'stays away for a SoundCloud track'
+
+mut 'dismissing the tip is forgotten on reload' app.js \
+  '    prefs.bgTipSeen = true;
+    store.write(K_PREF, prefs);' \
+  '    prefs.bgTipSeen = true;' \
+  tests/resume.spec.js 'dismissing the tip is permanent'
+
+# Switching source changes the answer without changing whether anything plays,
+# so the state.playing setter never fires and this is the only thing that paints.
+mut 'switching from SoundCloud to YouTube leaves the tip hidden' app.js \
+  '    /* Also here, not only from the state.playing setter: switching from a
+       SoundCloud track to a YouTube one changes the answer without changing
+       whether anything is playing, so the setter never fires. */
+    paintBgTip();' \
+  '    void 0;' \
+  tests/resume.spec.js 'brings the tip up'
+
+# ---------------------------------------------------------- the screen wake lock
+
+mut 'the screen is held for the life of the page, not while playing' app.js \
+  '    const want = state.playing && !document.hidden;' \
+  '    const want = !document.hidden;' \
+  tests/resume.spec.js 'nothing is held while nothing is playing'
+
+# The lock is released the moment the page hides and is not handed back. A
+# version that requests once looks correct until somebody leaves.
+mut 'the lock is never re-taken after the page hides' app.js \
+  '    syncWakeLock();
+    if (document.hidden) {' \
+  '    if (document.hidden) {' \
+  tests/resume.spec.js 'taken again on return'
+
+mut 'a lock the platform revoked is still believed held' app.js \
+  '        wakeLock.addEventListener("release", () => { wakeLock = null; });' \
+  '        void 0;' \
+  tests/resume.spec.js 'takes back is not believed'
+
+# state.playing is an accessor so this cannot be forgotten at one of seven
+# assignment sites. Severing it is the same as forgetting all seven.
+mut 'playing no longer drives the wake lock at all' app.js \
+  '      playingFlag = v;
+      syncWakeLock();' \
+  '      playingFlag = v;' \
+  tests/resume.spec.js 'held while a track plays'
+
 # ------------------------------------------------------- resume on return
 #
 # The embed pauses itself when the page is hidden, on a phone. Nothing here can
