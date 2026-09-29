@@ -6,6 +6,54 @@ to undo it.
 
 ---
 
+## 2026-09-29 — The ad signal was wrong, and what an ad actually looks like
+
+**Reported:** the mute-during-ads feature does not work. It never could.
+
+**Reproducing an ad took a persistent profile.** Sixty-odd plays on a fresh
+automated profile produced none, which is exactly why the first version shipped
+unverified. A profile warmed by a real visit to youtube.com gets them reliably.
+Confirmed separately that the browser is served ads at all by watching
+`#movie_player`'s own `ad-showing` class on youtube.com, where the DOM is
+same-origin and visible — that is what showed the problem was the setup and not
+the environment.
+
+**What the embed reports during an ad, measured three times on one track:**
+
+|                        | run 1 | run 2 | run 3 |
+|------------------------|------:|------:|------:|
+| First PLAYING event    | 18.5s | 16.5s | 16.4s |
+| Clock elapsed before it|   15s |   15s |   15s |
+| Video ids reported     | content only | content only | content only |
+| Durations reported     | 292 | 292 | 292 |
+
+So the embed says **nothing** about the ad. It reports the content's id and the
+content's duration throughout. The `getVideoData().video_id` comparison the
+first version was built on cannot fire, and neither can the duration mismatch
+that was held in reserve as a fallback. Both are removed rather than layered.
+
+**The replacement: the clock runs before the player starts.** A normal start
+reports PLAYING promptly; a dead or slow load leaves the clock at zero; an ad is
+the only case where time passes ON THE CLOCK before PLAYING. Both halves —
+`getCurrentTime()` and the state event — are documented API rather than a
+guessed field, which is the main reason to prefer it beyond it actually working.
+
+**Prerolls only.** A mid-roll happens after PLAYING has fired, so this cannot see
+one. Prerolls are what a jukebox meets.
+
+**A grace window covers the moment after a track change**, when the player can
+still report the previous track's clock. Without it every track change reads as
+an ad.
+
+**The same testing trap, twice, in one feature.** A mutation on the grace window
+went undetected because the fake player reset its clock instantly, so the stale
+read never happened in the test. Fixing that exposed a second layer: the fake's
+delayed reset from an earlier load fired later and zeroed a clock the test had
+since set. A fake that is tidier than the real thing tests nothing — the real
+player's messiness IS the requirement.
+
+---
+
 ## 2026-09-29 — A phone never showed what was playing
 
 **Found by asking where the ad chip would appear.** It appears on the source

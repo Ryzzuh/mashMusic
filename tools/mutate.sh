@@ -759,36 +759,49 @@ mut 'the now-playing text collapses to nothing on a phone' app.css \
   '  .stage-side { grid-template-rows: auto 88px; }' \
   tests/stage.spec.js 'visible on a phone'
 
-# ------------------------------------------------------------- muting an ad
+# ------------------------------------------------- muting a preroll ad
 #
-# Inferred from getVideoData() reporting an id we did not ask for. Undocumented,
-# so the guards matter more than the happy path: every one of these makes the
-# feature act on less certainty than it should.
+# The signal is "the clock is running but the player has never reported
+# PLAYING". Measured against three real ads: the embed reports the content's id
+# and duration throughout and says nothing about the ad, so the previous
+# id-comparison signal could never fire. These cover the replacement.
 
 mut 'an inferred ad is not muted at all' app.js \
   '      yt.mute();
       adMuted = true;' \
   '      adMuted = true;' \
-  tests/ads.spec.js 'an ad is muted'
+  tests/ads.spec.js 'clock running before the track starts'
 
 mut 'the mute is never handed back' app.js \
   '    try { if (yt && yt.unMute && yt.isMuted && yt.isMuted()) yt.unMute(); } catch (e) {}' \
   '    try { void 0; } catch (e) {}' \
-  tests/ads.spec.js 'an ad is muted'
+  tests/ads.spec.js 'handed back when the track itself starts'
 
-# Taking a mute the reader made, and handing it back later, is a change nobody
-# asked for and one they cannot attribute.
+# PLAYING is what says the preroll is over. Without disarming on it, the watch
+# keeps running through the track and mutes ordinary playback.
+mut 'the watch is never disarmed when the track starts' app.js \
+  '    adAwaitingStart = 0;
+    adClear();' \
+  '    adClear();' \
+  tests/ads.spec.js 'normal start is never muted'
+
+# Time passing is not the signal; time passing ON THE CLOCK is. Without this a
+# dead embed, which reports a clock of zero forever, reads as an ad.
+mut 'a load that never starts is treated as an ad' app.js \
+  '    if (!(t > AD_CLOCK)) { adPending = 0; return; }   // not started, or broken' \
+  '    if (false) { adPending = 0; return; }' \
+  tests/ads.spec.js 'never starts is not mistaken'
+
+# Just after loadVideoById the clock can still be reporting the previous track.
+mut 'a stale clock after a track change is trusted' app.js \
+  '    if (Date.now() - adAwaitingStart < AD_GRACE) return;' \
+  '    if (false) return;' \
+  tests/ads.spec.js 'stale clock just after a track change'
+
 mut "the reader's own mute is taken over" app.js \
   '      if (yt.isMuted && yt.isMuted()) return;' \
   '      if (false) return;' \
   tests/ads.spec.js 'reader made is left alone'
-
-# loadVideoById leaves the previous id reported for a moment. Without the
-# debounce that reads as an ad on every single track change.
-mut 'one sample is enough to believe an ad is running' app.js \
-  '    if (++adMismatch < AD_CONFIRM || adMuted) return;' \
-  '    if (adMuted) return;' \
-  tests/ads.spec.js 'not mistaken for an ad'
 
 mut 'stopping mid-ad leaves the player muted forever' app.js \
   '    if (!state.playing && adTimer) { clearInterval(adTimer); adTimer = 0; adClear(); }' \
