@@ -752,6 +752,34 @@ mut 'the capture takes Chrome voice processing defaults' app.js \
   '          /* removed */' \
   tests/liveeq.spec.js 'not for a voice call'
 
+# ---------------------------------------------------------- the screen wake lock
+
+mut 'the screen is held for the life of the page, not while playing' app.js \
+  '    const want = state.playing && !document.hidden;' \
+  '    const want = !document.hidden;' \
+  tests/resume.spec.js 'nothing is held while nothing is playing'
+
+# The lock is released the moment the page hides and is not handed back. A
+# version that requests once looks correct until somebody leaves.
+mut 'the lock is never re-taken after the page hides' app.js \
+  '    syncWakeLock();
+    if (document.hidden) {' \
+  '    if (document.hidden) {' \
+  tests/resume.spec.js 'taken again on return'
+
+mut 'a lock the platform revoked is still believed held' app.js \
+  '        wakeLock.addEventListener("release", () => { wakeLock = null; });' \
+  '        void 0;' \
+  tests/resume.spec.js 'takes back is not believed'
+
+# state.playing is an accessor so this cannot be forgotten at one of seven
+# assignment sites. Severing it is the same as forgetting all seven.
+mut 'playing no longer drives the wake lock at all' app.js \
+  '      playingFlag = v;
+      syncWakeLock();' \
+  '      playingFlag = v;' \
+  tests/resume.spec.js 'held while a track plays'
+
 # ------------------------------------------------------- resume on return
 #
 # The embed pauses itself when the page is hidden, on a phone. Nothing here can

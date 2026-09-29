@@ -94,6 +94,36 @@ are both gated on the same 860px breakpoint, because below it `.pinned` is stati
 — a pin could not hold anything on screen, and a lock set on a laptop would
 otherwise freeze the mode on a phone with no visible control to undo it.
 
+## Leaving the page, and coming back
+
+**The YouTube embed pauses itself when the page is hidden, on a phone.** Its own
+code, not the browser's. The SoundCloud widget is the same cross-origin iframe
+shape in the same tab and plays straight through, which is what proves it — the
+library's YT/SC mix is a ready-made A/B for this whole class of question. Not
+fixable from here: the pause happens inside a document the parent cannot script.
+Two wrong guesses are recorded in `DECISIONS.md` so they are not made again.
+
+**`state.playing` is an ACCESSOR, not a field.** Assigning it drives the screen
+wake lock. Seven places set it, and a rule enforced at seven call sites is a rule
+waiting for an eighth — same reasoning as `buildView()` owning every filter. If
+you add an eighth writer you get the behaviour for free; do not "simplify" it
+back to a plain property.
+
+**The wake lock is held only while something plays, and re-taken on every return
+to visibility.** The platform releases it whenever the page hides and does not
+hand it back, so requesting once and assuming it holds fails silently the first
+time anyone leaves. Every path is guarded: the request rejects on a browser
+without the API, on a hidden document, and on some devices at low battery, and
+none of those are surfaced.
+
+**Resume on return snapshots the intent as the tab HIDES.** Read on the way back,
+`state.playing` is false whether the embed paused it or the reader did. Whether
+it actually stopped is asked of the player rather than of `state.playing`, and
+`state.playing` is not set optimistically — returning to a tab is not a user
+gesture, so the browser may refuse the resume, and the transport must not claim
+otherwise. That refusal path has no local reproduction: a desktop browser never
+pauses to begin with.
+
 ## Playlists
 
 `TRACKS` is **not** a constant: it is the built-in library (`BUILTIN`, what

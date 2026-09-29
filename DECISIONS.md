@@ -6,6 +6,50 @@ to undo it.
 
 ---
 
+## 2026-09-29 — A screen wake lock while a track plays
+
+**Asked for:** keep the phone from sleeping, automatic while a track plays
+rather than a toggle.
+
+**Why it belongs to the same problem.** A jukebox gets put down. The screen
+dims, the phone locks, the page goes hidden, and the YouTube embed pauses
+itself — the same pause as tabbing away, reached by leaving the phone alone. A
+screen wake lock holds the page visible, which is the condition the embed needs.
+
+**Held only while something plays.** This asks a device to stay awake and that
+is not worth spending on a paused track. It is also why automatic beat a toggle:
+the condition is already known, so a switch would only be a way to get it wrong.
+
+**Re-acquired on every return to visibility.** The platform releases the lock
+whenever the page hides and does not hand it back. A version that requests once
+and assumes it still holds looks correct until somebody leaves, then fails
+silently. There is a mutation check for exactly that.
+
+**`state.playing` became an accessor.** Seven places assign it — two player
+callbacks each for YouTube and SoundCloud, `play()`, and the transport buttons —
+and a rule enforced at seven call sites is a rule waiting for an eighth. Same
+reasoning as `buildView()` owning every filter. Reversing it means putting a
+`syncWakeLock()` call at all seven and accepting that the eighth will miss it.
+
+**Two of my own tests passed for the wrong reason, and the harness caught both.**
+Worth recording because neither was obvious and both are the same species.
+
+- "Nothing is held while nothing is playing" asserted a request count of zero
+  after a wait. But `syncWakeLock()` only runs when something asks it to, so an
+  idle page never evaluates its condition, and the assertion was true whatever
+  the condition said. It passed against a version that held the screen on for
+  the life of the page. It now does a visibility round trip so the condition is
+  actually reached.
+- "A lock the platform revoked is not believed held" counted requests. Holding a
+  dead handle reaches the same request count by a different route: release the
+  stale one on the way out, request a fresh one on the way back. The tell is the
+  RELEASE count — nothing was held, so nothing should have been released.
+
+The lesson both share: a count that the correct and broken paths both arrive at
+is not evidence, and "the number matched" is the easiest way to miss that.
+
+---
+
 ## 2026-09-29 — Resume on return, and what the phone actually proved
 
 **Reported:** on a phone, tabbing out of the window stops the player.

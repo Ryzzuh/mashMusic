@@ -50,6 +50,35 @@ async function fakePlayer(page) {
   });
 }
 
+/** A screen wake lock the test can count. Real Chrome has a real one, so this
+ *  has to shadow it rather than fill a gap. */
+async function fakeWakeLock(page) {
+  await page.addInitScript(() => {
+    window.__wake = { requests: 0, releases: 0, listeners: [] };
+    Object.defineProperty(navigator, "wakeLock", {
+      configurable: true,
+      value: {
+        request: async (type) => {
+          window.__wake.requests++;
+          const mine = [];
+          window.__wake.listeners.push(mine);
+          return {
+            type, released: false,
+            addEventListener: (n, f) => { if (n === "release") mine.push(f); },
+            release: async () => { window.__wake.releases++; },
+          };
+        },
+      },
+    });
+    /* What a platform does of its own accord — switching apps, a system policy.
+       Not the same as the page releasing it, and the app has to survive both. */
+    window.__wakeTakenBack = () => {
+      window.__wake.listeners.forEach((fns) => fns.forEach((f) => f()));
+      window.__wake.listeners = [];
+    };
+  });
+}
+
 const setHidden = (page, hidden) => page.evaluate((h) => {
   Object.defineProperty(document, "hidden", { configurable: true, get: () => h });
   Object.defineProperty(document, "visibilityState",
@@ -62,6 +91,7 @@ const played = (page) => page.evaluate(() => window.__p.played);
 test.beforeEach(async ({ page }) => {
   await blockExternal(page);
   await fakePlayer(page);
+  await fakeWakeLock(page);
   await page.goto("/");
   await page.waitForSelector(".trow");
   // the real API is blocked, so stand in for it at the app's own entry point
@@ -120,4 +150,69 @@ test("a track that never stopped is not restarted", async ({ page }) => {
 
   await page.waitForTimeout(300);
   expect(await played(page)).toBe(before);
+});
+
+
+/* ------------------------------------------------------- the screen wake lock
+ *
+ * A jukebox gets put down, and a phone that locks itself hides the page, which
+ * is the same pause by another route. Held only while something plays. */
+
+const wake = (page) => page.evaluate(() => window.__wake);
+
+test("nothing is held while nothing is playing", async ({ page }) => {
+  /* A visibility round trip, not just a wait. syncWakeLock() only runs when
+     something asks it to, so an idle page never evaluates its condition at all
+     and "no lock was taken" is true for the wrong reason — which is exactly how
+     this test first passed against a version that held the screen on forever. */
+  await setHidden(page, true);
+  await setHidden(page, false);
+  await page.waitForTimeout(300);
+  expect((await wake(page)).requests).toBe(0);
+});
+
+test("the screen is held while a track plays, and let go when it stops", async ({ page }) => {
+  await playFirstYT(page);
+  await expect.poll(async () => (await wake(page)).requests).toBe(1);
+  expect((await wake(page)).releases).toBe(0);
+
+  await page.click("#bPause");
+  await expect.poll(async () => (await wake(page)).releases,
+    { message: "a paused track should not hold the screen on" }).toBe(1);
+});
+
+test("the hold is taken again on return, because the platform does not give it back", async ({ page }) => {
+  /* The failure this exists for: request once, assume it still holds. The lock
+     is released the moment the page hides, silently, and a version that does
+     not re-acquire looks correct for exactly as long as nobody leaves. */
+  await playFirstYT(page);
+  await expect.poll(async () => (await wake(page)).requests).toBe(1);
+
+  await setHidden(page, true);
+  await expect.poll(async () => (await wake(page)).releases).toBe(1);
+
+  await setHidden(page, false);
+  await expect.poll(async () => (await wake(page)).requests,
+    { message: "coming back should take a fresh lock" }).toBe(2);
+});
+
+test("a lock the platform takes back is not believed to be held", async ({ page }) => {
+  /* If the handle is kept after the platform revokes it, the next sync sees
+     "already held" and never asks again, so the screen quietly stops staying on
+     with nothing to show for it. */
+  await playFirstYT(page);
+  await expect.poll(async () => (await wake(page)).requests).toBe(1);
+
+  await page.evaluate(() => window.__wakeTakenBack());
+  await page.waitForTimeout(100);
+
+  await setHidden(page, true);
+  await setHidden(page, false);
+  await expect.poll(async () => (await wake(page)).requests).toBe(2);
+  /* The tell is the release count, not the request count. Holding a revoked
+     handle, the app releases it on the way out and re-requests on the way back,
+     reaching two requests by a route that only looks the same. Nothing was held
+     to release, so nothing should have been released. */
+  expect((await wake(page)).releases,
+    "a revoked lock should not be released as though it were held").toBe(0);
 });

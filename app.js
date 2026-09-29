@@ -478,6 +478,7 @@
 
   // ------------------------------------------------------------------- view
 
+  let playingFlag = false;
   const state = {
     query: "",
     favsOnly: false,
@@ -487,7 +488,17 @@
     order: [],       // indices into view; identity unless shuffled
     shown: 0,
     current: null,   // track object
-    playing: false
+    /* An accessor, not a field, so the screen wake lock cannot drift out of
+       step with it. Seven places set this — two player callbacks each for
+       YouTube and SoundCloud, play(), and the transport buttons — and a rule
+       enforced at seven call sites is a rule waiting for an eighth. Same reason
+       buildView() owns every filter. */
+    get playing() { return playingFlag; },
+    set playing(v) {
+      if (v === playingFlag) return;
+      playingFlag = v;
+      syncWakeLock();
+    }
   };
 
   function buildView() {
@@ -3333,6 +3344,52 @@
   paintPlaylist();
   // Picks up where a previous session left off; no-ops when nothing is missing.
   resolveAllMeta().then(resolveDurations);
+  /* Keep the screen on while something is playing.
+   *
+   * A jukebox gets put down. The screen dims, the phone locks, the page goes
+   * hidden, and the YouTube embed pauses itself — the same pause as tabbing
+   * away, reached by leaving the phone alone instead. A screen wake lock holds
+   * the page visible, which is the condition the embed needs.
+   *
+   * Held only while something plays, never for the life of the page. This asks
+   * a device to stay awake and that is not worth spending on a paused track.
+   *
+   * RE-ACQUIRED on every return to visibility, because the platform takes the
+   * lock back whenever the page hides and does not hand it over again. A
+   * version that requests once and assumes it still holds is the standard way
+   * to get this wrong, and it fails silently.
+   *
+   * Every path is guarded and none of the failures are surfaced. The request
+   * rejects on a browser without the API (Safari before 16.4), on a hidden
+   * document, and on some devices when the battery is low. In all of those the
+   * page behaves exactly as it did before any of this existed. */
+  let wakeLock = null;
+  let wakePending = false;
+
+  async function syncWakeLock() {
+    if (wakePending) return;                 // a request is already in flight
+    const want = state.playing && !document.hidden;
+    if (want === !!wakeLock) return;
+    wakePending = true;
+    try {
+      if (want) {
+        if (!("wakeLock" in navigator)) return;
+        wakeLock = await navigator.wakeLock.request("screen");
+        /* The platform can take it back on its own. Forget the handle when it
+           does, so the next sync asks again instead of believing a dead one. */
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      } else {
+        const held = wakeLock;
+        wakeLock = null;
+        await held.release();
+      }
+    } catch (e) {
+      wakeLock = null;                       // unsupported, hidden, or refused
+    } finally {
+      wakePending = false;
+    }
+  }
+
   /* Resume where it stopped, when the tab comes back.
    *
    * The YouTube embed pauses ITSELF when the page is hidden. That is its own
@@ -3366,6 +3423,10 @@
   let playingWhenHidden = false;
 
   document.addEventListener("visibilitychange", () => {
+    /* Both directions. Going away, this drops the lock explicitly rather than
+       trusting the platform's own release to have fired; coming back, it takes
+       one again, because the platform does not give it back. */
+    syncWakeLock();
     if (document.hidden) {
       playingWhenHidden = state.playing && !!state.current;
       return;

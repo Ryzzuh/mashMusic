@@ -219,8 +219,15 @@ be caught by any test.
   widget is the same cross-origin iframe shape in the same tab and plays
   straight through, which is what proves it. Nothing in our reach changes it;
   picture-in-picture is the sanctioned way to keep audio going. The app resumes
-  where it stopped when the tab comes back, which is the part that IS ours.
-  Measured 2026-09-27, diagnosed in `DECISIONS.md`.
+  where it stopped when the tab comes back, and holds a screen wake lock while a
+  track plays so a phone left alone does not put itself into that state — those
+  two are the parts that ARE ours. Measured 2026-09-27, diagnosed in
+  `DECISIONS.md`.
+- **A page cannot request the browser's "desktop site" mode**, and there is no
+  API, header or meta tag for it. Both mobile browsers remember it per site, so
+  it is set once from the browser's own settings. Widening the viewport meta
+  would change layout only, not the user agent and not any media policy, and it
+  would drop a phone above the 860px breakpoint into the peeling stage.
 
 - **A merge to `main` deploys.** GitHub Pages builds from `main`.
 - **There are no CI checks on this repository.** The only evidence behind any
