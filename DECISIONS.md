@@ -6,6 +6,67 @@ to undo it.
 
 ---
 
+## 2026-09-30 — An ad that outlasts its welcome costs the track
+
+**Asked for:** skip the song, not the ad, when an ad runs longer than N
+seconds; N is set by a stepper in fives, default 35.
+
+**The ad's length cannot be known up front, so the stopwatch is the only
+option.** `getDuration()` during a preroll returns the CONTENT's duration —
+measured three times on 2026-09-29 and recorded above — so there is no reading
+that says "this ad is 60 seconds" at the moment it starts. Deciding early was
+the better feature and it is simply not available. The tolerance is therefore
+time served: at 35s the reader waits 35 seconds and then moves on, rather than
+being told at second three that this one is not worth starting.
+
+**Wall clock from detection, not the player's clock.** The player's clock
+restarts for each ad in a stack, so two 20-second ads never pass a 35-second
+tolerance although the reader waited 40. Wall clock undercounts the ad's own
+elapsed time by the few hundred milliseconds between the ad starting and our
+confirming it, which is nothing on a scale that steps in fives.
+
+**The stopwatch starts at belief, not at the mute.** A reader who had already
+muted the player gets no mute from us — that is deliberate, and documented — but
+they must still get the skip. Tying the two together would have made the feature
+silently absent for exactly the people most likely to want it.
+
+**It refuses to fire with fewer than two playable tracks in the view.** `next()`
+lands on the same track and reloads it, which rolls the dice on another ad every
+`adTol` seconds forever. Counted over the view rather than read from
+`state.order.length`, because a view of twelve tracks with eleven dead in it has
+exactly the same single destination.
+
+**A skip does not decay the track.** `completed()` is the only thing that marks
+a track played, and the song was never heard. The first version of that test
+asserted on the status bar and was MISSED by its mutation: nothing re-renders
+the bar at that moment, so a track quietly added to the played set left the bar
+reading zero. It reads the store now.
+
+**The control lives in the top bar, as a fourth collapsible.** The status bar
+was the first choice and is already over its width budget at 430px — its items
+shrink below their text there. The transport flanks are hidden below 760px, and
+the now-playing row hides its own pin below 860px, so both would have put an
+ad control everywhere except the phone where ads and background playback
+actually bite. The top bar's overflow machinery already solves this: `.adskip`
+is first in `COLLAPSE_ORDER` (set once, then never thought about) and drops into
+the ⋯ panel at 900px and below. Measured after the change: one height of 59px
+and no overflow at any width from 320 to 1600, collapse order
+`[adskip, playlist, switch, listmode]`.
+
+**A stepper, not a menu**, because the value is a number on a fixed scale and a
+menu would need 24 entries to say the same thing. The scale is 5 to 120: below 5
+the tolerance would be inside the detection latency, and above 120 it stops
+meaning anything. There is no "off" position — it was not asked for, and one
+would be a floor entry below 5 if it is ever wanted.
+
+**To undo:** the whole feature is `adBail()`, the `adSince` stopwatch and the
+`AD_TOL` block in `app.js`, `.adskip` in `index.html` and `app.css`, `".adskip"`
+in `COLLAPSE_ORDER`, and the last six tests in `tests/ads.spec.js`. Removing
+`".adskip"` from `COLLAPSE_ORDER` alone leaves the control on the bar at every
+width, which overflows below 900px.
+
+---
+
 ## 2026-09-29 — The ad signal was wrong, and what an ad actually looks like
 
 **Reported:** the mute-during-ads feature does not work. It never could.

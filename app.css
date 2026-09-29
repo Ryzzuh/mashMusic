@@ -434,6 +434,65 @@ button { font: inherit; color: inherit; }
 .listmode-more[aria-expanded="true"] svg,
 .pl-caret[aria-expanded="true"] svg { transform: rotate(180deg); }
 
+/* ---------- ad tolerance stepper ---------- */
+
+/* Same box as .listmode, and deliberately its own class rather than a borrowed
+   one: sharing a class NAME with a control that JavaScript and the tests select
+   on is what broke four selectors when the playlist picker borrowed .listmode.
+
+   The value sits between the two steps rather than after them so the pair reads
+   as one control around a number, and it carries "ad" and the unit itself —
+   the bar has no room for a separate label, and a bare "35" beside a caret pair
+   says nothing about what it counts. */
+.adskip {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--sunk);
+}
+.adskip-val {
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  min-width: 62px;              /* "ad 5s" through "ad 120s" without reflowing */
+  color: var(--ink-2);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.adskip-step {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 6px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.adskip-step:first-of-type { border-radius: calc(var(--r) - 1px) 0 0 calc(var(--r) - 1px); }
+.adskip-step:last-of-type  { border-radius: 0 calc(var(--r) - 1px) calc(var(--r) - 1px) 0; }
+.adskip-step svg {
+  width: 12px; height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* one chevron symbol, pointing down; the raise button turns it over */
+.adskip-up svg { transform: rotate(180deg); }
+.adskip-step:hover:not([disabled]) { color: var(--ink); }
+/* At a limit the step does nothing, and a control that looks live but is not is
+   worse than one that says so. */
+.adskip-step[disabled] { opacity: .35; cursor: not-allowed; }
+
 .listmode-menu,
 .pl-menu {
   position: absolute;
@@ -1576,7 +1635,11 @@ main {
 }
 .tools-panel[hidden] { display: none; }
 .tools-panel .switch,
+.tools-panel .adskip,
 .tools-panel .listmode { width: 100%; }
+/* In the panel the group is full width, so the number takes the slack and the
+   two steps stay at the ends where a thumb expects them. */
+.tools-panel .adskip .adskip-val { flex: 1 1 auto; }
 .tools-panel .switch button,
 .tools-panel .listmode > button { flex: 1 1 auto; white-space: nowrap; }
 /* the picker drops from the panel, not from a bar that is no longer above it */
