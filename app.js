@@ -1417,6 +1417,7 @@
           if (e.data === YT.PlayerState.ENDED) completed();
           if (e.data === YT.PlayerState.PLAYING) {
             clearTimeout(watchdog);
+            adStarted();               // the track itself is running now
             state.playing = true;
             anchorClock();
             if (state.current) markLivenessOk(state.current);
@@ -1603,10 +1604,10 @@
        SoundCloud track to a YouTube one changes the answer without changing
        whether anything is playing, so the setter never fires. */
     paintBgTip();
-    /* And clear any ad inference outright: for a moment after loadVideoById the
-       player still reports the previous track, which is a mismatch that means
-       nothing. */
+    /* Arm the ad watch for this track. It disarms the moment the player reports
+       PLAYING, which is what tells us anything in front of the track is over. */
     adClear();
+    adAwaitingStart = track.s === "YT" ? Date.now() : 0;
   }
 
   let pendingYT = null;
@@ -3405,39 +3406,39 @@
     }
   }
 
-  /* Mute an ad.
+  /* Mute a preroll ad.
    *
-   * The player has no ad API. Enumerated against the real one: 73 methods, not
-   * one of them about ads, `getOptions()` empty, and no ad state among the six
-   * player states. The only ad-named method is `logImaAdEvent`, which reports
-   * INTO the ad system rather than telling us anything.
+   * The first version of this compared `getVideoData().video_id` against the id
+   * we asked for, on the assumption that an ad reports itself. It does not, and
+   * the assumption cost a shipped feature that could never fire. Measured on the
+   * live site, three consecutive ads on the same track:
    *
-   * What it does have is `getVideoData()`, which reports the id of the video
-   * actually on screen. During an ad that is the ad's id and not the one we
-   * asked for. That mismatch is the whole inference.
+   *     ids ever reported     the content's, only
+   *     durations reported    the content's, only  (292s, every time)
+   *     first PLAYING event   16.4s, 16.5s, 18.5s after the click
+   *     clock before that     15s, every time
    *
-   * This MUTES. It does not skip and does not block: the ad is fetched, played
-   * in full and counted. A reader would otherwise reach for the volume, and the
-   * point here is a device left on a table that nobody wants to pick up.
+   * So the embed says nothing about the ad. What it does instead is let the
+   * clock run for fifteen seconds while never once reporting PLAYING, and then
+   * report PLAYING with the clock reset to zero for the real track.
    *
-   * `getVideoData` is undocumented, so every read is guarded and the failure
-   * mode is silence — if the field changes or goes away, nothing is inferred and
-   * nothing is muted. It cannot start muting the wrong thing by breaking.
+   * That is the signal: time is passing but the player has not started. A normal
+   * start reports PLAYING promptly. A slow or broken load leaves the clock at
+   * zero. An ad is the only case where the clock advances before PLAYING — and
+   * both halves come from the documented API rather than a guessed field.
    *
-   * Debounced, because `loadVideoById()` leaves the PREVIOUS track's id reported
-   * for a moment: a single sample reads a track change as an ad. play() clears
-   * the count outright so a change never accumulates one at all. The cost is
-   * that roughly half a second of an ad is audible before the mute lands.
+   * PREROLLS ONLY. A mid-roll happens after PLAYING has already fired, so this
+   * cannot see one. Prerolls are what a jukebox meets.
    *
-   * NOT VERIFIED AGAINST A REAL AD. Ads do not serve reliably to an automated
-   * browser, so the tests drive the inference with a fake player and the live
-   * trigger is unproven. The guards are written so that the untested direction
-   * is the harmless one. */
+   * It mutes and nothing else. The ad is fetched, played in full and counted. */
   const AD_POLL = 250;
   const AD_CONFIRM = 2;              // consecutive samples before believing it
-  let adMismatch = 0;
+  const AD_GRACE = 600;              // ms after a load before the clock is trusted
+  const AD_CLOCK = 0.5;              // seconds of clock that count as "running"
+  let adPending = 0;                 // consecutive samples that looked like an ad
   let adMuted = false;               // WE muted, as opposed to the reader
   let adTimer = 0;
+  let adAwaitingStart = 0;           // when we asked; 0 once PLAYING has arrived
 
   function paintAd() {
     const el = $("npAd");
@@ -3446,7 +3447,7 @@
 
   /** Stop believing an ad is on, and hand back a mute we took. */
   function adClear() {
-    adMismatch = 0;
+    adPending = 0;
     if (!adMuted) return;
     adMuted = false;
     /* Only if it is still muted. A reader who unmuted during the ad has said
@@ -3455,17 +3456,23 @@
     paintAd();
   }
 
+  /** The track itself has started: whatever was in front of it is over. */
+  function adStarted() {
+    adAwaitingStart = 0;
+    adClear();
+  }
+
   function adWatch() {
-    if (!ytReady || !yt || !state.playing ||
+    if (!ytReady || !yt || !state.playing || !adAwaitingStart ||
         !state.current || state.current.s !== "YT") return adClear();
-    /* No separate check that getVideoData exists: calling an absent one throws,
-       and this catch already lands on exactly the same adClear(). The guard was
-       there and was removed, because a mutation could not tell it from nothing. */
-    let showing;
-    try { showing = (yt.getVideoData() || {}).video_id; } catch (e) { return adClear(); }
-    if (!showing) return;                        // between videos; decide nothing
-    if (showing === state.current.i) return adClear();
-    if (++adMismatch < AD_CONFIRM || adMuted) return;
+    /* The grace window covers the moment after loadVideoById, when the clock can
+       still be reporting the track that was playing a second ago. That stale
+       read is what made the previous signal fire on every track change. */
+    if (Date.now() - adAwaitingStart < AD_GRACE) return;
+    let t;
+    try { t = yt.getCurrentTime(); } catch (e) { return adClear(); }
+    if (!(t > AD_CLOCK)) { adPending = 0; return; }   // not started, or broken
+    if (++adPending < AD_CONFIRM || adMuted) return;
     try {
       /* Already muted by the reader: leave it. Taking a mute we did not make and
          handing it back later is a change nobody asked for. */
