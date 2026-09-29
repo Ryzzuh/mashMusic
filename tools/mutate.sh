@@ -752,6 +752,13 @@ mut 'the capture takes Chrome voice processing defaults' app.js \
   '          /* removed */' \
   tests/liveeq.spec.js 'not for a voice call'
 
+# The stacked layout must undo the two-column height trick, or .stage-side
+# collapses and .stage-meta's overflow:hidden clips the whole now-playing text.
+mut 'the now-playing text collapses to nothing on a phone' app.css \
+  '  .stage-side { grid-template-rows: auto 88px; height: auto; min-height: 0; }' \
+  '  .stage-side { grid-template-rows: auto 88px; }' \
+  tests/stage.spec.js 'visible on a phone'
+
 # ------------------------------------------------------------- muting an ad
 #
 # Inferred from getVideoData() reporting an id we did not ask for. Undocumented,

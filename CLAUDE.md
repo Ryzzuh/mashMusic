@@ -94,6 +94,21 @@ are both gated on the same 860px breakpoint, because below it `.pinned` is stati
 — a pin could not hold anything on screen, and a lock set on a laptop would
 otherwise freeze the mode on a phone with no visible control to undo it.
 
+**`.stage-side` must undo its own height trick when stacked.** `height: 0;
+min-height: 100%` is right for two columns, where the video sets the row height
+and the side column divides it. Below 860px that column is its own row, so the
+100% resolves against a row sized by a child declaring zero and the whole thing
+collapses — and `.stage-meta`'s `overflow: hidden` then clips the source line,
+title and contributor away completely. That shipped, and it meant a phone never
+showed what was playing. The narrow breakpoint sets `height: auto; min-height: 0`
+to undo it.
+
+**A rect cannot see clipping.** `getBoundingClientRect()` reports a box that
+`overflow: hidden` has hidden as sized, positioned and in the viewport. The bug
+above was invisible to every measurement and obvious in a screenshot. When a
+layout assertion is about whether something can be SEEN, check that the child
+sits inside the parent that clips it, not just that it has a height.
+
 ## Leaving the page, and coming back
 
 **The YouTube embed pauses itself when the page is hidden, on a phone.** Its own
