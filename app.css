@@ -1077,6 +1077,49 @@ main {
   font-variant-numeric: tabular-nums;
 }
 .stat-spacer { flex: 1; }
+
+/* The background-playback tip. Sits on the status bar, and is fixed rather than
+   in flow for the same reason the status bar is: nothing here may shift the
+   stage, whose height and offset are measured to the pixel by the suite.
+
+   Narrow only. Above 860px there is nothing to advise — and a phone that has
+   taken the advice reports a desktop-width viewport, so the tip removes itself
+   the moment it has been acted on, without needing to detect that. */
+.bgtip { display: none; }
+
+@media (max-width: 860px) {
+  .bgtip {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--bar-h);
+    z-index: 39;                    /* under the status bar, over everything else */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    background: var(--sunk);
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--ink-2);
+  }
+  .bgtip[hidden] { display: none; }
+  .bgtip b { color: var(--ink); font-weight: 600; }
+  .bgtip-x {
+    flex: none;
+    margin-left: auto;
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 4px 6px;
+    font-size: 17px;
+    line-height: 1;
+    color: var(--ink-3);
+    cursor: pointer;
+  }
+  .bgtip-x:hover { color: var(--ink); }
+}
 #statDead { color: var(--dead); }
 
 @media (max-width: 620px) {

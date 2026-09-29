@@ -112,7 +112,8 @@
   );
   if (!sources.size) ALL_SOURCES.forEach((x) => sources.add(x));   // same guard as the click path
 
-  const prefs = Object.assign({ skin: "jukebox", listMode: "show", stagePinned: false },
+  const prefs = Object.assign({ skin: "jukebox", listMode: "show", stagePinned: false,
+                                bgTipSeen: false },
                               store.read(K_PREF, {}));
 
   // --------------------------------------------------------------- playlists
@@ -498,6 +499,7 @@
       if (v === playingFlag) return;
       playingFlag = v;
       syncWakeLock();
+      paintBgTip();
     }
   };
 
@@ -1596,6 +1598,10 @@
       playSC(track);
       if (yt && ytReady) yt.pauseVideo();
     }
+    /* Also here, not only from the state.playing setter: switching from a
+       SoundCloud track to a YouTube one changes the answer without changing
+       whether anything is playing, so the setter never fires. */
+    paintBgTip();
   }
 
   let pendingYT = null;
@@ -3218,7 +3224,11 @@
      expanded height is a function of the width, so a stale peel puts the
      threshold in the wrong place. */
   window.addEventListener("resize", () => { measureStage(); updateStageCollapse(); });
-  WIDE.addEventListener("change", () => { measureStage(); updateStageCollapse(); });
+  WIDE.addEventListener("change", () => {
+    measureStage();
+    updateStageCollapse();
+    paintBgTip();                    // crossing the breakpoint changes the answer
+  });
   pinBtn.setAttribute("aria-pressed", String(stageLocked));
   pinBtn.addEventListener("click", () => {
     stageLocked = !stageLocked;
@@ -3389,6 +3399,35 @@
       wakePending = false;
     }
   }
+
+  /* The one honest thing the page can say about background playback on a phone.
+   *
+   * The embed's pause is USER AGENT gated. Measured on a phone, 2026-09-29:
+   * with the browser's desktop-site setting on, switching apps and minimising
+   * both leave playback running. A page cannot request that mode — no API, no
+   * header, no meta tag, by design — so naming the setting is the whole of what
+   * is available to us.
+   *
+   * Shown only where it is both true and actionable: a narrow viewport, and a
+   * YouTube track actually playing. SoundCloud never stops, so saying it there
+   * would be noise. And a reader who takes the advice reports a desktop-width
+   * viewport from then on, so the tip retires itself without needing to detect
+   * that it worked.
+   *
+   * Dismissed for good, in prefs. A tip that comes back is a nag. */
+  function paintBgTip() {
+    const el = $("bgTip");
+    if (!el) return;
+    const want = !prefs.bgTipSeen && !WIDE.matches &&
+      state.playing && !!state.current && state.current.s === "YT";
+    el.hidden = !want;
+  }
+
+  $("bgTipX").addEventListener("click", () => {
+    prefs.bgTipSeen = true;
+    store.write(K_PREF, prefs);
+    paintBgTip();
+  });
 
   /* Resume where it stopped, when the tab comes back.
    *

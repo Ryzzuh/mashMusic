@@ -306,6 +306,15 @@
   </footer>
 </dialog>
 
+<!-- Only thing the page can honestly do about background playback on a phone:
+     name the browser setting that fixes it. Fixed rather than in flow, so it
+     cannot move the stage the geometry assertions measure. -->
+<div class="bgtip" id="bgTip" hidden>
+  <span>YouTube tracks stop when you leave this tab. Your browser&rsquo;s
+    <b>Desktop site</b> setting keeps them playing.</span>
+  <button class="bgtip-x" id="bgTipX" type="button" aria-label="Dismiss this tip">&times;</button>
+</div>
+
 <footer class="statusbar">
   <span id="statLoaded">—</span>
   <span id="statDead"></span>

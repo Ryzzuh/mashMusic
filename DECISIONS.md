@@ -6,6 +6,49 @@ to undo it.
 
 ---
 
+## 2026-09-29 — Naming the browser setting that fixes background playback
+
+**Established first:** the embed's pause is user agent gated. With the browser's
+desktop-site setting on, switching apps and minimising both leave playback
+running. Measured on the phone. That reverses an earlier conclusion in this file
+that the Page Visibility API was the mechanism; it is not.
+
+**A page cannot request that mode** — no API, no header, no meta tag, by design.
+So the only honest move is to name the setting, which is what the tip does.
+
+**Shown only where it is both true and actionable:** a narrow viewport and a
+YouTube track actually playing. SoundCloud never stops, so saying it there is
+noise. Dismissed permanently, in prefs, because a tip that returns is a nag.
+
+**It retires itself.** A reader who takes the advice reports a desktop-width
+viewport from then on, so the narrow-viewport condition stops matching. Nothing
+has to detect that it worked.
+
+**Fixed rather than in flow**, for the same reason the status bar is: nothing may
+shift the stage, whose height and offset the suite measures to the pixel.
+
+**Three things the mutation harness caught, and the third is the interesting
+one.**
+
+- Switching from a SoundCloud track to a YouTube one left the tip hidden. That
+  changes the answer without changing whether anything is playing, so the
+  `state.playing` accessor never fires. `play()` paints too, now, with a test.
+- Dismissal was not persisted in the first draft.
+- **A padding rule added "to make room" for the tip did nothing at all.** Its
+  mutation could not be caught, which prompted measuring rather than weakening
+  the test: without the rule the last row still clears the tip by 37px at 360px
+  wide and 44px at 700px, because the clearance below the listing already
+  existed. The rule and the attribute driving it were deleted. The overlap test
+  was kept as a guard against the tip growing a line, and says in its comment
+  that no code of ours keeps it true — so a later reader does not mistake it for
+  evidence.
+
+The general lesson, and it is the second time this session: a mutation that
+cannot be caught is more often dead code than a weak test. Measure before
+assuming the test is at fault.
+
+---
+
 ## 2026-09-29 — A screen wake lock while a track plays
 
 **Asked for:** keep the phone from sleeping, automatic while a track plays
