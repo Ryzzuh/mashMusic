@@ -3333,8 +3333,50 @@
   paintPlaylist();
   // Picks up where a previous session left off; no-ops when nothing is missing.
   resolveAllMeta().then(resolveDurations);
+  /* Resume where it stopped, when the tab comes back.
+   *
+   * The YouTube embed pauses ITSELF when the page is hidden. That is its own
+   * code, not the browser's: the SoundCloud widget in the same tab is the same
+   * cross-origin iframe shape and plays straight through, which is what rules
+   * out anything being suspended. Measured on a phone, 2026-09-27.
+   *
+   * So this does NOT give background audio and cannot. What it removes is
+   * coming back to a player stopped mid-track and having to find your place.
+   *
+   * Three things here are deliberate.
+   *
+   * The intent is snapshotted as the tab HIDES, before the embed's pause
+   * arrives as an onStateChange. Reading state.playing on the way back is too
+   * late: by then it is false, and indistinguishable from a reader who paused
+   * on purpose before switching away.
+   *
+   * Whether it actually stopped is asked of the PLAYER, not of state.playing.
+   * The mirrored flag depends on a PAUSED event surviving a backgrounded tab,
+   * and a throttled one that never arrives would leave the transport claiming
+   * to play in silence.
+   *
+   * state.playing is NOT set here. Returning to a tab is not a user gesture, so
+   * the browser may refuse the resume; letting the player's own PLAYING event
+   * set the flag keeps the transport honest about whether anything restarted.
+   *
+   * YouTube only, because YouTube is the only one that stops. The SoundCloud
+   * widget reports its state through a callback rather than a return value, so
+   * there is no way to ask it the same question without guessing, and nothing
+   * to fix if we could. */
+  let playingWhenHidden = false;
+
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) resolveDurations();      // the loop stops when hidden
+    if (document.hidden) {
+      playingWhenHidden = state.playing && !!state.current;
+      return;
+    }
+    resolveDurations();                            // the loop stops when hidden
+    const wasPlaying = playingWhenHidden;
+    playingWhenHidden = false;
+    if (!wasPlaying || !state.current || state.current.s !== "YT") return;
+    if (!ytReady || !yt || !yt.getPlayerState || !window.YT) return;
+    if (yt.getPlayerState() === YT.PlayerState.PLAYING) return;   // never stopped
+    yt.playVideo();
   });
 
   document.documentElement.dataset.skin = prefs.skin;

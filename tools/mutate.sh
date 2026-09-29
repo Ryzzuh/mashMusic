@@ -752,6 +752,31 @@ mut 'the capture takes Chrome voice processing defaults' app.js \
   '          /* removed */' \
   tests/liveeq.spec.js 'not for a voice call'
 
+# ------------------------------------------------------- resume on return
+#
+# The embed pauses itself when the page is hidden, on a phone. Nothing here can
+# stop that; these cover what the app does about it.
+
+mut 'coming back does not resume what the embed paused' app.js \
+  '    if (yt.getPlayerState() === YT.PlayerState.PLAYING) return;   // never stopped
+    yt.playVideo();' \
+  '    if (yt.getPlayerState() === YT.PlayerState.PLAYING) return;   // never stopped' \
+  tests/resume.spec.js 'resumed on return'
+
+# Snapshotting at hide is what separates "the embed paused it" from "the reader
+# paused it". Both look identical by the time the tab is visible again.
+mut 'the reader pausing before they leave is forgotten' app.js \
+  '      playingWhenHidden = state.playing && !!state.current;' \
+  '      playingWhenHidden = true;' \
+  tests/resume.spec.js 'stays paused'
+
+# The mirrored flag depends on a PAUSED event surviving a backgrounded tab. The
+# player is asked instead, so a resume only fires when something really stopped.
+mut 'the player is trusted to have stopped rather than asked' app.js \
+  '    if (yt.getPlayerState() === YT.PlayerState.PLAYING) return;   // never stopped' \
+  '    if (false) return;' \
+  tests/resume.spec.js 'never stopped is not restarted'
+
 # ------------------------------------------------------------------- the pin
 #
 # Locking is the absence of the peel, so most of these break the same variable

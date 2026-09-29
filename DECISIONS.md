@@ -6,6 +6,59 @@ to undo it.
 
 ---
 
+## 2026-09-29 — Resume on return, and what the phone actually proved
+
+**Reported:** on a phone, tabbing out of the window stops the player.
+
+**Diagnosed by elimination, using the library's own two sources.** Both players
+are cross-origin iframes: YouTube at the nocookie host, SoundCloud at
+`w.soundcloud.com`. Backgrounding the tab stops YouTube and does not stop
+SoundCloud. Same page, same browser, same tab. That rules out tab suspension,
+rules out cross-origin iframes being treated differently, and rules out the
+app's missing media session, since SoundCloud survives without one too. What is
+left is the YouTube embed pausing itself when the page is hidden.
+
+**Two hypotheses died on the way, and both were mine.** That the app was pausing
+on `visibilitychange`: it has one such handler and it only ever starts the
+duration resolver. And that the nocookie host was hiding a Premium entitlement
+from the embed: Rhys has no Premium, and youtube.com keeps playing for him
+anyway, so the entitlement was never the variable.
+
+**There is no fix for the stopping, and that is settled rather than unexplored.**
+The pause happens inside a document that cannot be scripted from the parent, so
+every "stop it noticing" idea is unreachable by construction. Picture-in-picture
+is the sanctioned exception. The one workaround that would work is resolving the
+media URL server-side and playing it in an element we own, which is against
+YouTube's terms and was not built.
+
+**So what shipped is the part that is ours: coming back.** Three deliberate
+choices in it.
+
+- **The intent is snapshotted as the tab HIDES.** Read on the way back,
+  `state.playing` is false whether the embed paused it or the reader did, and
+  resuming a track someone deliberately stopped is worse than not resuming.
+- **Whether it stopped is asked of the player, not of `state.playing`.** The
+  mirrored flag depends on a PAUSED event surviving a backgrounded tab; a
+  throttled one that never arrives would leave the transport claiming to play in
+  silence.
+- **`state.playing` is not set optimistically.** Returning to a tab is not a
+  user gesture, so the browser may refuse the resume. The player's own PLAYING
+  event sets the flag, so the transport cannot claim something that did not
+  happen. This is the one part that could not be verified here: a desktop
+  browser never pauses in the first place, so the refusal path has no local
+  reproduction.
+
+**YouTube only.** SoundCloud reports its state through a callback rather than a
+return value, so it cannot be asked the same question synchronously — and it
+never stops, so there is nothing to fix.
+
+**The tests simulate the pause, and say so.** The embed's behaviour is
+mobile-only and cannot be reproduced in the suite's browser. They call
+`onYouTubeIframeAPIReady` themselves rather than adding a third test-only seam,
+which is the app's own entry point and the API the suite blocks.
+
+---
+
 ## 2026-09-10 — The live spectrum, run for real, and what that found
 
 **Asked for:** try the live spectrum against a real capture. It had only ever

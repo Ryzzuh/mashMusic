@@ -204,6 +204,7 @@ be caught by any test.
 | `tools/check-liveness.mjs` | Offline liveness. Resumable. Needs a key for the YouTube half. |
 | `tools/find-replacements.mjs` | YouTube replacement search. Never run; needs a key. |
 | `tools/build-envelopes.py` | Offline spectral analysis → the `mashMusic-eq` repository. |
+| `tests/resume.spec.js` | Resume on return. Simulates the embed's pause — a desktop browser never does it. |
 | `tools/live-capture-check.mjs` | The live spectrum against a REAL capture. Headed, by hand, never in the suite. |
 | `tools/mutate.sh` | Mutation harness. Edits app files in place — never run git alongside it. |
 | `tools/serve.py` | Dev server. Threaded; sends `no-store`; maps `/mashMusic-eq/`. |
@@ -212,6 +213,14 @@ be caught by any test.
 | `~/start-mashmusic.sh` | Starts the dev server from a terminal. Outside the repo. |
 
 ## Gotchas
+
+- **The YouTube embed pauses itself when the page is hidden, on a phone.** Its
+  own code, not the browser's, and not anything this app does. The SoundCloud
+  widget is the same cross-origin iframe shape in the same tab and plays
+  straight through, which is what proves it. Nothing in our reach changes it;
+  picture-in-picture is the sanctioned way to keep audio going. The app resumes
+  where it stopped when the tab comes back, which is the part that IS ours.
+  Measured 2026-09-27, diagnosed in `DECISIONS.md`.
 
 - **A merge to `main` deploys.** GitHub Pages builds from `main`.
 - **There are no CI checks on this repository.** The only evidence behind any
