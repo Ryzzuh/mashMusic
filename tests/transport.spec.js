@@ -182,7 +182,15 @@ test("the readouts count from the playing track's position", async ({ page }) =>
      the same test on a second run, and later passed at a higher load average)
      and the checkOne() call added to play() (disabling it reproduced the
      failure anyway). The mechanism is still not established, which is why the
-     catch block below exists — the next failure should explain itself. */
+     catch block below exists — the next failure should explain itself.
+
+     Measured 2026-09-30, A/B on the same machine minutes apart: this test
+     fails 1 run in 3 at load averages of 60 and 175, on `main` and on a
+     feature branch alike, while `tests/resume.spec.js` passed 39 of 39 on both
+     sides. So the flake is real, is not any one change's doing, and tracks
+     machine load without being explained by it. Both recorded failures caught
+     the click doing nothing at all: `nowPlaying: "Nothing playing"` with
+     `currentRows: 0`, and once a played track with no current row. */
   test.setTimeout(60_000);
   const tracksLeft = () =>
     page.evaluate(() => Number(document.getElementById("mTracksLeft").textContent));
