@@ -59,6 +59,28 @@ the tolerance would be inside the detection latency, and above 120 it stops
 meaning anything. There is no "off" position — it was not asked for, and one
 would be a floor entry below 5 if it is ever wanted.
 
+**Measured against the live embed, 2026-09-30, 65 plays in three passes: no
+preroll was served, and the chip fired seven times anyway.** Every one of the
+seven was the same shape — chip on at 2.5-3.3s, chip off 26 to 412ms later, at
+the same millisecond as the PLAYING event. That is the clock crossing 0.1s
+slightly before the player reports it has started, on about one start in five.
+It costs a sub-second mute and a flash of the chip, and it is a defect in the
+MUTE that predates this change; nothing in the repository had ever watched the
+chip at that resolution.
+
+The skip is immune to it by construction, and this is the first evidence for
+that: the stopwatch needs `adTol` seconds of UNBROKEN belief, and the longest
+false positive ever observed is 412ms against a 5-second floor. A mute-only
+feature shows the wart; the skip cannot be reached by it.
+
+**The fix is not taken here**, because it belongs to the mute and would be a
+second change smuggled into this one. What the numbers support: muting only
+after the belief has held for ~600ms, which kills all seven observed false
+positives and costs a real ad about 400ms more before the mute lands. The ad
+hunt is the limiting factor — a profile warmed on youtube.com is served ads for
+a while and then stops, which is why the third pass reported
+`ad showing = false` on its own warm-up.
+
 **To undo:** the whole feature is `adBail()`, the `adSince` stopwatch and the
 `AD_TOL` block in `app.js`, `.adskip` in `index.html` and `app.css`, `".adskip"`
 in `COLLAPSE_ORDER`, and the last six tests in `tests/ads.spec.js`. Removing
