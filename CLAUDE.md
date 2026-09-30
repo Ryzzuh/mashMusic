@@ -139,6 +139,34 @@ gesture, so the browser may refuse the resume, and the transport must not claim
 otherwise. That refusal path has no local reproduction: a desktop browser never
 pauses to begin with.
 
+## Ads
+
+**The embed says nothing about an ad.** Measured against three real ones: it
+reports the content's id and the content's duration throughout. The only signal
+is that the clock runs before the player ever reports PLAYING — a normal start
+reports PLAYING promptly, a dead load leaves the clock at zero, and an ad is the
+only case in between. A grace window covers the moment after a track change,
+when the player can still be reporting the previous track's clock. Prerolls
+only: a mid-roll happens after PLAYING has fired and is invisible to this.
+
+**Two things are done with that signal, and neither of them touches the ad.**
+The player is muted for the ad's duration, and an ad that outlasts the reader's
+tolerance costs the TRACK — the player moves on, as if Next had been pressed.
+Nothing skips, blocks or hurries the ad itself.
+
+**The tolerance is wall clock from detection, not the player's clock.** The
+player's clock restarts for each ad in a stack, so two 20-second ads would never
+pass a 35-second tolerance although the reader waited 40 seconds. Detection
+lands ~2.5s after the click, of which ~2.3s is the embed starting up, so wall
+clock undercounts the ad's own elapsed time by a few hundred milliseconds —
+nothing, on a scale that steps in fives.
+
+**Abandoning a track does not decay it.** `completed()` is the only thing that
+marks a track played; the ad skip goes through `next()`, like the button. And it
+refuses to fire when the view holds fewer than two playable tracks, because
+`next()` would land on the same track and reload it — one ad traded for another,
+once per tolerance, forever.
+
 ## Playlists
 
 `TRACKS` is **not** a constant: it is the built-in library (`BUILTIN`, what

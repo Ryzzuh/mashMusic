@@ -112,8 +112,13 @@
   );
   if (!sources.size) ALL_SOURCES.forEach((x) => sources.add(x));   // same guard as the click path
 
+  /* How long an ad may run before the track behind it is abandoned. Seconds,
+     on a fixed 5-second scale. Declared up here because `prefs` needs the
+     default; the behaviour that reads it is in the ad block, near the players. */
+  const AD_TOL = { min: 5, max: 120, step: 5, def: 35 };
+
   const prefs = Object.assign({ skin: "jukebox", listMode: "show", stagePinned: false,
-                                bgTipSeen: false },
+                                bgTipSeen: false, adSkip: AD_TOL.def },
                               store.read(K_PREF, {}));
 
   // --------------------------------------------------------------- playlists
@@ -3257,14 +3262,15 @@
    * its own floor; past that, whole controls move into a panel behind a "more"
    * button rather than wrapping the bar to a second row.
    *
-   * Collapse order is least-used-first: a playlist is chosen once a session at
-   * most, the theme is set once and left alone, the list-mode picker is
-   * reached for more often, and the search is never collapsed because it is
-   * the only way to reach a specific track in 1,257.
+   * Collapse order is least-used-first: the ad tolerance is set once and then
+   * never thought about again, a playlist is chosen once a session at most, the
+   * theme is set once and left alone, the list-mode picker is reached for more
+   * often, and the search is never collapsed because it is the only way to
+   * reach a specific track in 1,257.
    *
    * Every pass starts from fully expanded, so widening the window restores
    * controls to the bar instead of stranding them in the panel. */
-  const COLLAPSE_ORDER = [".playlist", ".skin-switch", ".listmode"];
+  const COLLAPSE_ORDER = [".adskip", ".playlist", ".skin-switch", ".listmode"];
   const toolsEl = document.querySelector(".tools");
   const toolsPanel = $("toolsPanel");
   const toolsMore = $("toolsMore");
@@ -3458,15 +3464,80 @@
   let adMuted = false;               // WE muted, as opposed to the reader
   let adTimer = 0;
   let adAwaitingStart = 0;           // when we asked; 0 once PLAYING has arrived
+  let adSince = 0;                   // when this ad became believable; 0 if none
 
   function paintAd() {
     const el = $("npAd");
     if (el) el.hidden = !adMuted;
   }
 
+  /* ---------------------------------------------- how long an ad may run
+   *
+   * A long ad in front of a three-minute song is a bad trade, and the one thing
+   * a page CAN do about it is give up on that song rather than sit through it.
+   * So: an ad that outlasts the tolerance costs the track it is in front of,
+   * not the reader's attention. Nothing is skipped inside the ad — we could
+   * not if we wanted to, and were not asked to.
+   *
+   * Measured from the moment the ad becomes believable, by wall clock, and NOT
+   * from the player's own clock. Two reasons. The player's clock restarts for
+   * each ad in a stack, so two 20-second ads would never pass a 35-second
+   * tolerance although the reader waited 40 seconds; and it is the waiting that
+   * this number is about. Detection lands ~2.5s after the click, of which ~2.3s
+   * is the embed starting up before the ad's clock moves at all, so wall clock
+   * from detection undercounts the ad's own elapsed time by a few hundred
+   * milliseconds — far inside a 5-second scale. */
+  const clampTol = (v) => {
+    const n = Math.round(Number(v) / AD_TOL.step) * AD_TOL.step;
+    if (!Number.isFinite(n)) return AD_TOL.def;
+    return Math.min(AD_TOL.max, Math.max(AD_TOL.min, n));
+  };
+
+  let adTol = clampTol(prefs.adSkip);
+
+  function paintAdTol() {
+    const out = $("adSkipVal");
+    if (out) out.textContent = `ad ${adTol}s`;
+    const down = $("adSkipDown"), up = $("adSkipUp");
+    if (down) down.disabled = adTol <= AD_TOL.min;
+    if (up) up.disabled = adTol >= AD_TOL.max;
+  }
+
+  function setAdTol(secs) {
+    adTol = clampTol(secs);
+    prefs.adSkip = adTol;
+    store.write(K_PREF, prefs);
+    paintAdTol();
+  }
+
+  if ($("adSkipDown")) $("adSkipDown").addEventListener("click", () => setAdTol(adTol - AD_TOL.step));
+  if ($("adSkipUp")) $("adSkipUp").addEventListener("click", () => setAdTol(adTol + AD_TOL.step));
+  paintAdTol();
+
+  /* The ad has outlasted the tolerance: leave the track, keep the reader.
+   *
+   * Pressing Next, in effect, so the track is not marked played — it was never
+   * heard, and decaying it here would quietly delete it from the session. The
+   * mute goes back first: `next()` loads another video and the watch re-arms
+   * for it, so anything left set here would be read against the wrong track. */
+  function adBail() {
+    /* Nowhere to go. With one playable track next() lands on the same one and
+       reloads it, trading this ad for another every `adTol` seconds forever.
+       Counted rather than taken from order.length, because a view of twelve
+       tracks with eleven dead in it has exactly the same single destination. */
+    let playable = 0;
+    for (const i of state.order) if (!isSkippable(state.view[i])) playable++;
+    if (playable < 2) return;
+    adClear();
+    adAwaitingStart = 0;
+    $("statNote").textContent = `skipped a track \u00b7 ad over ${adTol}s`;
+    next();
+  }
+
   /** Stop believing an ad is on, and hand back a mute we took. */
   function adClear() {
     adPending = 0;
+    adSince = 0;
     if (!adMuted) return;
     adMuted = false;
     /* Only if it is still muted. A reader who unmuted during the ad has said
@@ -3491,15 +3562,23 @@
     let t;
     try { t = yt.getCurrentTime(); } catch (e) { return adClear(); }
     if (!(t > AD_CLOCK)) { adPending = 0; return; }   // not started, or broken
-    if (++adPending < AD_CONFIRM || adMuted) return;
-    try {
-      /* Already muted by the reader: leave it. Taking a mute we did not make and
-         handing it back later is a change nobody asked for. */
-      if (yt.isMuted && yt.isMuted()) return;
-      yt.mute();
-      adMuted = true;
-      paintAd();
-    } catch (e) { /* leave the player alone */ }
+    if (++adPending < AD_CONFIRM) return;
+    /* The ad is believed from here. The stopwatch starts at belief and not at
+       the mute, because a reader who had already muted the player gets no mute
+       from us and must still get the skip. */
+    if (!adSince) adSince = Date.now();
+    if (!adMuted) {
+      try {
+        /* Already muted by the reader: leave it. Taking a mute we did not make
+           and handing it back later is a change nobody asked for. */
+        if (!(yt.isMuted && yt.isMuted())) {
+          yt.mute();
+          adMuted = true;
+          paintAd();
+        }
+      } catch (e) { /* leave the player alone */ }
+    }
+    if (Date.now() - adSince >= adTol * 1000) adBail();
   }
 
   function syncAdWatch() {

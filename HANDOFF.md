@@ -1,13 +1,17 @@
 # HANDOFF
 
-Written 2026-09-09. Task state only — durable project knowledge is in
+Written 2026-09-30. Task state only — durable project knowledge is in
 `/Users/Rhys/Projects/claude/mashmusic/CLAUDE.md`, and the reasoning behind
 individual judgement calls is in `DECISIONS.md` (newest first).
 
 ## Current task
 
-Nothing is in flight. `main` is clean, everything is pushed, no pull request is
-open, and both deployments are serving.
+The ad tolerance: an ad that runs longer than the reader's number costs the
+TRACK, and a stepper in the top bar sets that number in fives, default 35s.
+Built, suite green, all nine of its mutations caught. What is NOT done: a real
+ad has never been seen to trigger the skip — the fake player models the shape,
+which is the same evidence the mute shipped on, and the mute was later measured
+against three real ads with `adlen.mjs`. Do the same here if it matters.
 
 "Done" for the current phase means: playlists can be imported from a Google
 Sheet and resolve their metadata quickly; the spectrum can follow a track that
@@ -50,7 +54,13 @@ run on 2026-09-10 and is automated in `tools/live-capture-check.mjs`.
   the peel: the variable is held at 0 and the scroll handler returns early. Both
   the control and the lock are gated on the same 860px breakpoint. Persisted as
   `stagePinned` in `mash.prefs.v1`.
-- 192 Playwright tests, 100 mutation checks in `tools/mutate.sh`, all passing.
+- **Muting a preroll, and giving up on a long one.** The signal is the clock
+  running before the player reports PLAYING; the embed says nothing about an ad
+  itself. The player is muted for the ad and the chip on the source line says
+  so. An ad that outlasts the tolerance (the `ad 35s` stepper in the top bar,
+  5 to 120 in fives, `adSkip` in `mash.prefs.v1`) takes the track with it, as
+  if Next had been pressed. Nothing skips, blocks or hurries the ad.
+- 228 Playwright tests, 144 mutation checks in `tools/mutate.sh`, all passing.
 - Rollback tag `pre-spec-2026-09-03` exists on both repositories.
 
 **Merged pull requests**, all on `Ryzzuh/mashMusic`: #1–#7 (earlier work),
