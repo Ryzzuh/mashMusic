@@ -167,6 +167,40 @@ test("an active source filter is visible even where the flanks are hidden", asyn
   await expect(page.locator("#statSrc")).toHaveText(/only/);   // still discoverable
 });
 
+/* Click a row without racing the stage.
+ *
+ * Playwright scrolls a row into view and then clicks it, and that scroll is
+ * what triggers the stage to collapse — which takes 263px out of the layout
+ * ABOVE the row at this file's 1100px viewport, because `overflow-anchor` is
+ * off and the wide path does not compensate for its own shrink (the narrow one
+ * now does; see DECISIONS.md 2026-10-23). Under load the click can land after
+ * the row has moved, and it then starts nothing at all: two full-suite runs
+ * failed here reporting exactly that, `nowPlaying: "Nothing playing"` with no
+ * current row, while 16 of 16 clicks landed on a quiet machine.
+ *
+ * Scrolling first and waiting for the layout to come to rest takes the race
+ * out of the test. It does not take it out of the app — a reader scrolling at
+ * this width gets the same 263px jump, which is recorded as its own question
+ * rather than fixed here. */
+async function clickRowSettled(page, nth) {
+  const row = page.locator(".trow").nth(nth);
+  await row.scrollIntoViewIfNeeded();
+  await page.evaluate(() => new Promise((resolve) => {
+    const read = () => Math.round(window.scrollY) + "|" +
+      document.querySelector(".tracklist").getBoundingClientRect().top.toFixed(1);
+    let last = null, stable = 0, frames = 0;
+    const step = () => {
+      const now = read();
+      stable = now === last ? stable + 1 : 0;
+      last = now;
+      if (stable >= 2 || ++frames > 90) return resolve();     // ~1.5s cap
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }));
+  await row.click();
+}
+
 test("the readouts count from the playing track's position", async ({ page }) => {
   /* ~13s alone: two row clicks, each auto-scrolled to and each waiting on the
      readout to repaint. That sits close enough to the 30s default to time out
@@ -192,7 +226,7 @@ test("the readouts count from the playing track's position", async ({ page }) =>
   // Play rows at known positions. "less than 1257" was satisfied by the search
   // filter alone, so replacing positionOf() with 0 left the old test green.
   for (const [nth, expected] of [[4, 1252], [30, 1226]]) {
-    await page.locator(".trow").nth(nth).click();
+    await clickRowSettled(page, nth);
     try {
       await expect.poll(tracksLeft, { timeout: 30_000 }).toBe(expected);
     } catch (e) {
