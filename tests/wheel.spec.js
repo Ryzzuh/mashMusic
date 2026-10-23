@@ -78,6 +78,14 @@ test.describe("selection distribution", () => {
     }, n);
 
   test("weighted odds follow track count, even odds do not", async ({ page }) => {
+    /* 800 draws, and the budget has to fit them on a machine doing other
+       things. Measured 2026-10-23 across three full-suite runs: 18.3s on a
+       quiet machine, 34.8s under load, and one timeout at the 30s default —
+       which reported as a failed distribution test and was nothing of the
+       kind. The sample size is what makes the two bounds meaningful (the
+       comment below has the numbers), so the budget moves rather than n. */
+    test.setTimeout(120_000);
+
     // Beau Garcia holds 330 of 1257 tracks (26%) but is 1 of 71 people (1.4%),
     // so the two modes should separate clearly.
     await openWheel(page);
