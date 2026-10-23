@@ -378,6 +378,17 @@ centre only, so it cannot see an edge hanging off screen —
 mutated tree and planted a deliberately broken value into the working files,
 which then produced two false conclusions.
 
+**A timeout is not a budget problem until you have checked what it was
+waiting for.** Two tests failed a full-suite run each on 2026-10-23 and only
+one of them wanted more time. `wheel.spec.js`'s distribution test drives 800
+draws and genuinely needs 18-35s depending on load, so its budget moved.
+`transport.spec.js`'s readout test normally takes 4s and was failing because
+the click landed in a moving layout — Playwright's own scroll-into-view
+triggers the stage collapse, which takes 263px out of the layout above the row
+at 1100px, and the click then starts nothing. More budget would have waited
+longer for something that was never going to happen. It scrolls and lets the
+layout settle before clicking instead.
+
 Also: check `uptime` before trusting a timing measurement. Concurrent suite runs
 drove load average to 209 and manufactured failures that looked like real bugs.
 
