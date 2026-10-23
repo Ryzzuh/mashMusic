@@ -103,6 +103,19 @@ title and contributor away completely. That shipped, and it meant a phone never
 showed what was playing. The narrow breakpoint sets `height: auto; min-height: 0`
 to undo it.
 
+**The narrow collapse moves the document above the reader, so the scroll
+position absorbs it.** `display: none` on `.stage-media` takes 297px out of the
+flow at 375px wide and 468px at 700px, all of it above wherever the reader is,
+and `overflow-anchor` is off for reasons in `DECISIONS.md` — so everything below
+used to lurch up by that much mid-scroll. Two halves, both required: the
+collapse is **deferred** until there is enough scroll above it to absorb the
+shrink (otherwise the compensation clamps at the document top and the reader
+lands back inside the expand threshold, which alternates on every scroll
+event), and the compensation runs **on the way in only** (at the top, the stage
+returning is what the reader scrolled up for). `measureStage()` therefore
+measures the shrink at every width, not just wide — the peel is wide-only, the
+shrink is not.
+
 **A rect cannot see clipping.** `getBoundingClientRect()` reports a box that
 `overflow: hidden` has hidden as sized, positioned and in the viewport. The bug
 above was invisible to every measurement and obvious in a screenshot. When a
