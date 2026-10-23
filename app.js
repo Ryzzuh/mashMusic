@@ -3133,6 +3133,7 @@
      one line apart in the two files and compared by eye. */
   const WIDE = window.matchMedia("(min-width: 861px)");
   const NARROW_COLLAPSE_Y = 40;      // the pre-peel threshold, still used narrow
+  const NARROW_EXPAND_Y = 4;         // back at the top, and the stage comes back
 
   let stageCollapsed = false;
   /* The pin. Locking is the ABSENCE of the peel: hold --stage-peel at 0 and the
@@ -3158,8 +3159,12 @@
      with the width, so none of the three was right at every size. */
   let stageShrink = 0;
 
+  /* Measured at EVERY width, not just wide. The peel is a wide-only idea and
+     stays 0 below the breakpoint, but the shrink is what the narrow path has to
+     absorb when it collapses, and it is a different number there — 297px at
+     375px wide against 468px at 700px. This used to return early and leave it
+     at 0, which is why nothing could compensate for it. */
   function measureStage() {
-    if (!WIDE.matches) { stagePeel = 0; stageShrink = 0; applyPeel(); return; }
     const was = stageEl.classList.contains("is-collapsed");
     /* Both heights, read synchronously with transitions suppressed.
        getBoundingClientRect() forces layout, so each read is the settled height
@@ -3178,7 +3183,7 @@
     void stageEl.getBoundingClientRect();      // settle before transitions return
     stageEl.style.removeProperty("transition");
     pinnedEl.style.removeProperty("transition");
-    stagePeel = expanded / 2;
+    stagePeel = WIDE.matches ? expanded / 2 : 0;
     stageShrink = expanded - collapsed;
     applyPeel();
   }
@@ -3212,7 +3217,7 @@
        band on the expand side is the fix. */
     const want = WIDE.matches
       ? stagePeel > 0 && y >= stagePeel
-      : (stageCollapsed ? y > 4 : y > NARROW_COLLAPSE_Y);
+      : (stageCollapsed ? y > NARROW_EXPAND_Y : y > NARROW_COLLAPSE_Y);
     /* A short list — one search result, say — may not have enough document left
        to stay past the threshold once the stage shrinks, and the two states
        would alternate on every scroll event. The figure is now the shrink
@@ -3220,9 +3225,52 @@
        measure. */
     if (want && !stageCollapsed && room < (stageShrink || 260)) return;
     if (want === stageCollapsed) return;
+
+    /* Narrow, collapsing: the stage's media leaves the FLOW, above the reader.
+     *
+     * `.stage.is-collapsed .stage-media { display: none }` takes 297px out of
+     * the document at 375px wide and 468px at 700px, all of it above wherever
+     * the reader is, and `overflow-anchor` is off for reasons recorded in
+     * DECISIONS.md — so everything below lurches up by that much. Measured
+     * 2026-10-23: a 60px scroll moved the list 357px on a phone. Whatever was
+     * under a thumb is not there when it lands, and the suite caught it as four
+     * tests whose click kept missing a row that had moved out from under it.
+     *
+     * So the scroll position absorbs the shrink instead, and the only visible
+     * change is the video disappearing. Two halves, and both are needed:
+     *
+     * Defer until there is room above to absorb it. Without this the
+     * compensation clamps at the top of the document and the reader lands back
+     * inside the expand threshold, which collapses and expands on alternate
+     * scroll events. It means the stage now holds on until the video has very
+     * nearly scrolled away, which is also the only point where removing it is
+     * free.
+     *
+     * Compensate on the way IN only. Expanding happens when the reader is back
+     * at the top, where the stage returning IS what they scrolled up for;
+     * holding their position there would scroll them away from the thing they
+     * came back to see. */
+    if (want && !WIDE.matches && y - stageShrink <= NARROW_EXPAND_Y) return;
+
+    const anchor = listEl.getBoundingClientRect().top;
     stageCollapsed = want;
     stageEl.classList.toggle("is-collapsed", want);
     applyPeel();
+
+    if (want && !WIDE.matches) {
+      /* Transitions off for the read, the same probe measureStage() uses: the
+         height goes at once because `display: none` cannot animate, but `gap`
+         is transitioned on this element and a future rule might not be. Class
+         and inline style are both back before the task ends, so nothing paints
+         in between and the probe starts no transition of its own. */
+      stageEl.style.transition = "none";
+      const moved = listEl.getBoundingClientRect().top - anchor;
+      stageEl.style.removeProperty("transition");
+      /* Instant: a smooth scroll here would animate the very movement this
+         exists to hide. The scroll event it fires re-enters this function with
+         the class already set, where the first comparison returns. */
+      if (moved) window.scrollBy({ top: moved, left: 0, behavior: "instant" });
+    }
   }
 
   window.addEventListener("scroll", updateStageCollapse, { passive: true });

@@ -302,7 +302,11 @@ test("the pin is not offered, or obeyed, where nothing pins", async ({ page }) =
   await settle(page);
   expect(await page.isVisible("#npPin"), "hidden where it would be a lie").toBe(false);
 
-  await page.evaluate(() => window.scrollTo(0, 300));
+  /* 900 and not 300: the narrow collapse now waits until there is enough
+     scroll above it to absorb the shrink, which is 468px at this width. This
+     test is about the lock being ignored, not about where the threshold sits —
+     see "collapsing on a phone does not move the list under the reader". */
+  await page.evaluate(() => window.scrollTo(0, 900));
   await settle(page);
   expect((await geo(page)).collapsed, "narrow ignores the lock entirely").toBe(true);
 });
@@ -411,6 +415,78 @@ test("the stage does not pin on a narrow viewport", async ({ page }) => {
   expect(await page.evaluate(() =>
     document.querySelector(".stage").classList.contains("is-collapsed"))).toBe(true);
   expect(await peelOf(page)).toBe(0);
+});
+
+/* Walk the page the way a thumb does — in equal steps — and report how far the
+ * list moved BEYOND the step that was asked for. Zero means nothing lurched.
+ * Absolute scrollTo() is no good here: the fix moves the scroll position
+ * itself, so the next absolute target would be a jump of its own and the probe
+ * would measure its own instrument. */
+const walk = (page, dir, steps) => page.evaluate(async ({ dir, steps }) => {
+  const list = document.querySelector(".tracklist");
+  const stage = document.querySelector(".stage");
+  const STEP = 40;
+  let prev = list.getBoundingClientRect().top;
+  let prevY = window.scrollY;
+  let was = stage.classList.contains("is-collapsed");
+  let worst = 0, at = 0, collapses = 0, expands = 0, sentBack = 0;
+  for (let i = 0; i < steps; i++) {
+    window.scrollBy({ top: dir * STEP, left: 0, behavior: "instant" });
+    await new Promise((r) => setTimeout(r, 60));
+    const top = list.getBoundingClientRect().top;
+    const lurch = Math.round((top - prev) + dir * STEP);
+    const is = stage.classList.contains("is-collapsed");
+    if (is !== was) { is ? collapses++ : expands++; was = is; }
+    if (Math.abs(lurch) > Math.abs(worst)) { worst = lurch; at = Math.round(window.scrollY); }
+    /* The page sending the reader the way they did NOT ask to go. Moving the
+       scroll position is how the compensation works, so this is the measure
+       that separates a correction from a shove. */
+    const back = Math.round((window.scrollY - prevY) * -dir);
+    if (back > sentBack) sentBack = back;
+    prev = top; prevY = window.scrollY;
+  }
+  return { worst, at, collapses, expands, sentBack,
+           collapsed: stage.classList.contains("is-collapsed") };
+}, { dir, steps });
+
+test("collapsing on a phone does not move the list under the reader", async ({ page }) => {
+  /* `.stage.is-collapsed .stage-media { display: none }` takes the video out of
+     the flow ABOVE the reader — 297px at this width — and `overflow-anchor` is
+     off, so everything below used to lurch up by that much mid-scroll.
+     Measured 2026-10-23 before the fix: a 60px scroll moved the list 357px.
+
+     Four tests in resume.spec were failing on it without naming it: a click
+     aimed at a row that was 462px away by the time it landed. */
+  await page.setViewportSize({ width: 375, height: 812 });
+  await settle(page);
+
+  const down = await walk(page, 1, 25);
+  expect(down.collapses, "the stage must still collapse, or this passes by doing nothing")
+    .toBeGreaterThan(0);
+  expect(Math.abs(down.worst), `the list moved ${down.worst}px at y=${down.at}`)
+    .toBeLessThanOrEqual(2);
+});
+
+test("the stage comes back when a phone scrolls to the top", async ({ page }) => {
+  /* The other half of the same decision, and the reason the compensation is on
+     the way IN only: at the top, the stage returning is what the reader
+     scrolled up for. Holding their position here would scroll them away from
+     the thing they came back to see. */
+  await page.setViewportSize({ width: 375, height: 812 });
+  await settle(page);
+  await walk(page, 1, 25);
+  expect(await page.evaluate(() =>
+    document.querySelector(".stage").classList.contains("is-collapsed"))).toBe(true);
+
+  const up = await walk(page, -1, 30);
+  expect(up.expands).toBeGreaterThan(0);
+  expect(up.collapsed).toBe(false);
+  expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(0);
+  /* And it never sends them back down to do it. Compensating the expand as
+     well leaves the list where it was, which looks right by the measure above
+     and is wrong: it costs the reader the ~300px they just scrolled up. */
+  expect(up.sentBack, "scrolling up must never scroll the reader down")
+    .toBeLessThanOrEqual(2);
 });
 
 test("the now-playing text is visible on a phone, not clipped to nothing", async ({ page }) => {
