@@ -3508,6 +3508,24 @@
   const AD_CONFIRM = 2;              // consecutive samples before believing it
   const AD_GRACE = 600;              // ms after a load before the clock is trusted
   const AD_CLOCK = 0.1;              // seconds of clock that count as "running"
+  /* How long the belief has to hold before we take the mute.
+   *
+   * Measured against the live embed on 2026-10-23, over 40 plays that drew no
+   * ad at all: the chip still came up 7 times — on at 2.5-3.3s, off again 26 to
+   * 412ms later, at the same millisecond as PLAYING. That is the clock crossing
+   * AD_CLOCK slightly before the player gets round to saying it has started, on
+   * about one start in five, and it cost a sub-second mute at the head of a
+   * track. The signal cannot tell that case from an ad at the moment it fires —
+   * both are "the clock is moving and nothing has started" — so the only thing
+   * that separates them is how long it stays true. 412ms is the longest ever
+   * observed; 600 clears it with room and is the same figure as the grace
+   * window, for the same kind of reason.
+   *
+   * It is the MUTE that waits, not the belief. The skip's stopwatch still
+   * starts at the first confirmed sample, because a false positive ends when
+   * PLAYING arrives and takes the stopwatch with it — and the shortest
+   * tolerance on the scale is 5 seconds, which no 412ms blip can reach. */
+  const AD_MUTE_HOLD = 600;
   let adPending = 0;                 // consecutive samples that looked like an ad
   let adMuted = false;               // WE muted, as opposed to the reader
   let adTimer = 0;
@@ -3615,7 +3633,8 @@
        the mute, because a reader who had already muted the player gets no mute
        from us and must still get the skip. */
     if (!adSince) adSince = Date.now();
-    if (!adMuted) {
+    const held = Date.now() - adSince;
+    if (!adMuted && held >= AD_MUTE_HOLD) {
       try {
         /* Already muted by the reader: leave it. Taking a mute we did not make
            and handing it back later is a change nobody asked for. */
@@ -3626,7 +3645,7 @@
         }
       } catch (e) { /* leave the player alone */ }
     }
-    if (Date.now() - adSince >= adTol * 1000) adBail();
+    if (held >= adTol * 1000) adBail();
   }
 
   function syncAdWatch() {

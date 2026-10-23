@@ -162,6 +162,16 @@ only case in between. A grace window covers the moment after a track change,
 when the player can still be reporting the previous track's clock. Prerolls
 only: a mid-roll happens after PLAYING has fired and is invisible to this.
 
+**The mute waits 600ms; the belief does not.** The clock crosses the threshold
+before the player reports PLAYING on about one ordinary start in five — measured
+over 40 ad-free plays, chip on at 2.5-3.3s and off 26 to 412ms later at the same
+millisecond as PLAYING. Nothing distinguishes that from an ad at the moment it
+fires; only how long it stays true does. `AD_MUTE_HOLD` is therefore the longest
+false positive ever observed plus room. The skip's stopwatch still starts at the
+first confirmed sample: a false positive ends when PLAYING arrives and takes the
+stopwatch with it, and the shortest tolerance on the scale is 5 seconds. After:
+0 chips in the same 40 plays.
+
 **Two things are done with that signal, and neither of them touches the ad.**
 The player is muted for the ad's duration, and an ad that outlasts the reader's
 tolerance costs the TRACK — the player moves on, as if Next had been pressed.

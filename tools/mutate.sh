@@ -777,6 +777,18 @@ mut 'the mute is never handed back' app.js \
   '    try { void 0; } catch (e) {}' \
   tests/ads.spec.js 'handed back when the track itself starts'
 
+# One start in five has the clock crossing the threshold before PLAYING lands.
+mut 'the mute is taken the instant the clock moves' app.js \
+  '    if (!adMuted && held >= AD_MUTE_HOLD) {' \
+  '    if (!adMuted) {' \
+  tests/ads.spec.js 'just before the track starts is not muted'
+
+# And the hold must not swallow the real thing.
+mut 'the hold is so long no ad is ever muted' app.js \
+  '  const AD_MUTE_HOLD = 600;' \
+  '  const AD_MUTE_HOLD = 60000;' \
+  tests/ads.spec.js 'clock running before the track starts'
+
 # PLAYING is what says the preroll is over. Without disarming on it, the watch
 # keeps running through the track and mutes ordinary playback.
 mut 'the watch is never disarmed when the track starts' app.js \
