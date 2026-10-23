@@ -113,6 +113,23 @@ test("a normal start is never muted", async ({ page }) => {
   expect(await chip(page)).toBe(false);
 });
 
+test("a clock that moves just before the track starts is not muted", async ({ page }) => {
+  /* The embed's own start, not an ad. Measured against the live player over 40
+     ad-free plays: on about one start in five the clock crosses the threshold
+     26 to 412ms before PLAYING arrives, and the first version of this feature
+     muted every one of them for that long. The signal cannot tell the two
+     apart when it fires — only how long each stays true can. */
+  await playYT(page);
+  await page.waitForTimeout(700);                  // past the grace window
+  await page.evaluate(() => window.__adRuns(0.4)); // the track's own first frames
+  await page.waitForTimeout(400);                  // the longest gap ever measured
+  await page.evaluate(() => window.__trackStarts());
+  await page.waitForTimeout(600);
+
+  expect((await p(page)).mutes, "a start is not an ad").toBe(0);
+  expect(await chip(page)).toBe(false);
+});
+
 test("a load that never starts is not mistaken for an ad", async ({ page }) => {
   /* A dead or slow embed leaves the clock at zero. Time passing on its own is
      not the signal; time passing ON THE CLOCK is. */

@@ -6,6 +6,43 @@ to undo it.
 
 ---
 
+## 2026-10-23 — The mute was firing on one ordinary start in five
+
+**Found by a probe, not by a report.** 40 plays against the live embed drew no
+ad at all and the chip still came up 7 times: on at 2.5-3.3s, off again 26 to
+412ms later, at the same millisecond as PLAYING. The clock crosses `AD_CLOCK`
+slightly before the player gets round to saying it has started, and the feature
+muted every one of those for as long as it lasted. It arrived with the 0.5 ->
+0.1 threshold tuning in #20 and nothing had ever watched the chip at a
+resolution that would show it.
+
+**Nothing separates the two cases at the moment the signal fires.** Both are
+"the clock is moving and the player has not started". `getDuration()` reports
+the content's duration in both. The only discriminator is time, so the mute
+waits: `AD_MUTE_HOLD = 600`, which is the longest false positive ever observed
+(412ms) plus room, and the same figure as the grace window for the same kind of
+reason.
+
+**The MUTE waits, not the belief.** `adSince` still starts at the first
+confirmed sample, so the skip's stopwatch is unchanged — a false positive ends
+when PLAYING arrives and `adClear()` takes the stopwatch with it, and the
+shortest tolerance on the scale is 5 seconds, which a 412ms blip cannot reach.
+One timestamp, two thresholds.
+
+**The cost is real and was accepted deliberately.** A genuine ad is now muted
+~600ms later, so the chip lands around 3.1-3.7s rather than 2.5-3.1s, which
+gives back part of the tuning from #20. A mute that fires on one ordinary start
+in five is worse than half a second of ad: the false positive clips the head of
+a track the reader chose, and does it five times an hour.
+
+**Measured after: 0 chips in the same 40 plays**, same ids, same warm-up.
+
+**To undo:** `AD_MUTE_HOLD` and the `held` variable in `adWatch()`, the test
+"a clock that moves just before the track starts is not muted", and its two
+mutation checks.
+
+---
+
 ## 2026-10-23 — The narrow collapse was moving the page under the reader
 
 **Found by the suite, named by nothing.** Four `resume.spec` tests began failing
