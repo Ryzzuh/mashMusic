@@ -920,6 +920,37 @@ mut 'releasing the pin waits for the next scroll' app.js \
   });' \
   tests/stage.spec.js 'catches up with the scroll position'
 
+# ------------------------------- the narrow collapse moving the page
+
+mut 'the narrow collapse is not compensated for' app.js \
+  '      if (moved) window.scrollBy({ top: moved, left: 0, behavior: "instant" });' \
+  '      void moved;' \
+  tests/stage.spec.js 'does not move the list under the reader'
+
+# Without room above to absorb the shrink the compensation clamps at the top of
+# the document, which leaves the reader inside the expand threshold.
+mut 'the collapse is not deferred until there is room for it' app.js \
+  '    if (want && !WIDE.matches && y - stageShrink <= NARROW_EXPAND_Y) return;' \
+  '    if (false) return;' \
+  tests/stage.spec.js 'does not move the list under the reader'
+
+# The shrink is a different number narrow than wide, and measuring it there is
+# what the deferral is computed from. This is the early return it used to have.
+mut 'the shrink is not measured on a narrow viewport' app.js \
+  '  function measureStage() {
+    const was = stageEl.classList.contains("is-collapsed");' \
+  '  function measureStage() {
+    if (!WIDE.matches) { stagePeel = 0; stageShrink = 0; applyPeel(); return; }
+    const was = stageEl.classList.contains("is-collapsed");' \
+  tests/stage.spec.js 'does not move the list under the reader'
+
+# Compensating on the way out too would scroll the reader away from the stage
+# they came back to the top to see.
+mut 'the expand is compensated for as well' app.js \
+  '    if (want && !WIDE.matches) {' \
+  '    if (!WIDE.matches) {' \
+  tests/stage.spec.js 'comes back when a phone scrolls to the top'
+
 mut 'a pinned stage looks exactly like an unpinned one' app.css \
   '.np-pin[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }' \
   '.np-pin[aria-pressed="true"] { border-color: var(--accent); }' \

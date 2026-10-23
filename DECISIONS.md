@@ -6,6 +6,60 @@ to undo it.
 
 ---
 
+## 2026-10-23 — The narrow collapse was moving the page under the reader
+
+**Found by the suite, named by nothing.** Four `resume.spec` tests began failing
+on a quiet machine, on `main` as well as on a feature branch, with clicks that
+missed a row. Instrumented, the sequence is unambiguous:
+
+    at rest                       y=0    collapsed=false  target row top=774
+    after scrollIntoViewIfNeeded  y=769  collapsed=false  target row top=5
+    584ms later                   y=769  collapsed=TRUE   target row top=-462
+
+The click is aimed at a row at y=5 and 462px later it is off the top of the
+screen. The cause is `.stage.is-collapsed .stage-media { display: none }`
+removing the video from the flow ABOVE the reader, with `overflow-anchor: none`
+(2026-09-05, and still right) so nothing compensates. **Measured: a 60px scroll
+moved the list 297px at 375px wide and 468px at 700px.** A thumb is subject to
+exactly the same thing; the tests were the only ones complaining.
+
+**Chosen: compensate the scroll, and defer the collapse until that is
+possible.** After the class goes on, the list's movement is measured and
+`scrollBy` cancels it, so the only visible change is the video disappearing.
+Measured after: worst lurch 0px at both widths, and the stage still collapses.
+
+Three alternatives were weighed. **Re-enabling `overflow-anchor` below 860px**
+is one line and lets Chrome do it, but it partly reverts the 2026-09-05 fix and
+is only clearly safe under 760px, where the jump controls are hidden.
+**Collapsing to a thumbnail instead of removing the video** shrinks the delta
+rather than handling it. **Making the tests robust** fixes the suite and leaves
+the thumb.
+
+**The deferral is not optional.** Without it the compensation clamps at the top
+of the document and leaves the reader inside the expand threshold, so the stage
+collapses and expands on alternate scroll events. It does change behaviour: the
+narrow stage now holds on until the video has nearly scrolled away — 472px at
+700px rather than 40px — which is also the only point at which removing it is
+free. Two existing tests asserted the old threshold and were updated.
+
+**The compensation is on the way IN only.** Expanding happens at the top, where
+the stage returning is what the reader scrolled up for; holding their position
+there would scroll them ~300px away from the thing they came back to see. The
+test for it asserts the scroll never reverses, because the obvious measure —
+did the list stay put — reads a compensated expand as correct.
+
+**The wide path is untouched and still lurches**: 263px at 1100px wide when the
+stage collapses under the sticky block. Left alone deliberately — it is the
+peel mechanism, its tests are green, and whether it reads as a defect there is
+a separate question from this one.
+
+**To undo:** the deferral line, the compensation block in
+`updateStageCollapse()`, and the narrow measurement in `measureStage()`, all in
+`app.js`; plus the two tests in `tests/stage.spec.js` and their four mutation
+checks.
+
+---
+
 ## 2026-09-29 — The ad signal was wrong, and what an ad actually looks like
 
 **Reported:** the mute-during-ads feature does not work. It never could.
