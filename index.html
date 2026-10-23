@@ -77,6 +77,24 @@
       </div>
     </div>
 
+    <!-- Ad tolerance. A stepper and not a menu because the value is a number on
+         a fixed scale: a menu would need 24 entries to say the same thing. The
+         readout carries its own unit so the group needs no separate label in a
+         bar that is already at its width budget; the title says the rest. -->
+    <div class="adskip" id="adSkipCtl" role="group"
+         aria-label="Skip the track when an ad runs longer than this"
+         title="Skip the track when an ad runs longer than this">
+      <button class="adskip-step" id="adSkipDown" type="button"
+              aria-label="Lower the ad tolerance by 5 seconds">
+        <svg aria-hidden="true"><use href="#i-caret"></use></svg>
+      </button>
+      <span class="adskip-val" id="adSkipVal" aria-live="polite">ad 35s</span>
+      <button class="adskip-step adskip-up" id="adSkipUp" type="button"
+              aria-label="Raise the ad tolerance by 5 seconds">
+        <svg aria-hidden="true"><use href="#i-caret"></use></svg>
+      </button>
+    </div>
+
     <div class="switch skin-switch" role="group" aria-label="Theme">
       <button data-skin="jukebox" aria-pressed="true">Jukebox</button>
       <button data-skin="night" aria-pressed="false">Night Dial</button>

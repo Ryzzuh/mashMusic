@@ -169,3 +169,140 @@ test("stopping during an ad hands the mute back", async ({ page }) => {
   await expect.poll(() => chip(page)).toBe(false);
   expect((await p(page)).muted).toBe(false);
 });
+
+/* --------------------------------------------- giving up on a long ad
+ *
+ * The tolerance is a number of seconds the reader sets in the top bar. An ad
+ * that runs past it costs the track it is in front of: the player moves on.
+ * Nothing about the ad itself is skipped, blocked or hurried.
+ *
+ * 5s is the floor of the scale, and these tests step down to it rather than
+ * seeding a pref, so the control and the behaviour are exercised by the same
+ * run — a tolerance nothing can reach from the interface is not a feature. */
+
+const curKey = (page) =>
+  page.evaluate(() => {
+    const row = document.querySelector('.trow[aria-current="true"]');
+    return row ? row.dataset.key : null;
+  });
+
+/** Step the control down to its floor, however many steps that is. */
+async function tolFloor(page) {
+  for (let i = 0; i < 30; i++) {
+    if (!(await page.locator("#adSkipDown").isEnabled())) break;
+    await page.click("#adSkipDown");
+  }
+  await expect(page.locator("#adSkipVal")).toHaveText("ad 5s");
+}
+
+test("an ad past the tolerance costs the track, not the reader", async ({ page }) => {
+  await tolFloor(page);
+  await playYT(page);
+  const first = await curKey(page);
+  expect(first).toBeTruthy();
+
+  await page.waitForTimeout(700);
+  await page.evaluate(() => window.__adRuns(3));
+  await expect.poll(() => chip(page)).toBe(true);
+
+  await expect.poll(async () => (await curKey(page)) !== first, { timeout: 15_000 })
+    .toBe(true);
+
+  /* The mute belongs to the ad we walked away from, so it goes back on the way
+     out; the new track must not inherit it. */
+  expect((await p(page)).muted).toBe(false);
+  await expect.poll(() => chip(page)).toBe(false);
+  /* And the track was never heard, so it is not decayed. Pressing Next does
+     not mark a track played, and neither does this. Read from the store and
+     not from the status bar: nothing here re-renders the bar, so a track
+     quietly added to the played set leaves it reading zero. */
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("mash.played.v1") || "[]"))).toEqual([]);
+});
+
+test("an ad inside the tolerance is left to finish", async ({ page }) => {
+  /* The default is 35s, so three seconds of ad is nothing to act on. Without a
+     threshold at all, any ad would take the track with it. */
+  await expect(page.locator("#adSkipVal")).toHaveText("ad 35s");
+  await playYT(page);
+  const first = await curKey(page);
+
+  await page.waitForTimeout(700);
+  await page.evaluate(() => window.__adRuns(3));
+  await expect.poll(() => chip(page)).toBe(true);
+  await page.waitForTimeout(3000);
+
+  expect(await curKey(page)).toBe(first);
+  expect(await chip(page), "still muted, still waiting").toBe(true);
+});
+
+test("the tolerance measures the ad and never the track", async ({ page }) => {
+  /* The worst bug this feature could have: a stopwatch that keeps running once
+     the music starts would throw a track away every five seconds. */
+  await tolFloor(page);
+  await playYT(page);
+  const first = await curKey(page);
+
+  await page.evaluate(() => window.__trackStarts());
+  await page.evaluate(() => window.__adRuns(30));   // the track itself, playing
+  await page.waitForTimeout(6500);
+
+  expect(await curKey(page)).toBe(first);
+  expect((await p(page)).mutes).toBe(0);
+});
+
+test("with nowhere to go the ad is not traded for another", async ({ page }) => {
+  /* One playable track means the next one IS this one, and reloading it rolls
+     the dice on another ad — forever, at one throw per tolerance. */
+  await tolFloor(page);
+  await page.fill("#search", "Hot Natured (Jamie Jones");
+  await expect.poll(() => page.locator(".trow").count()).toBe(1);
+
+  await page.locator(".trow").first().click();
+  await page.waitForTimeout(700);
+  const first = await curKey(page);
+  await page.evaluate(() => window.__adRuns(3));
+  await expect.poll(() => chip(page)).toBe(true);
+  await page.waitForTimeout(6500);
+
+  expect(await curKey(page)).toBe(first);
+  expect(await chip(page), "the ad is still on, and still muted").toBe(true);
+});
+
+test("the tolerance steps by five, stops at both ends, and is remembered", async ({ page }) => {
+  const val = page.locator("#adSkipVal");
+  await expect(val).toHaveText("ad 35s");
+
+  await page.click("#adSkipDown");
+  await expect(val).toHaveText("ad 30s");
+  await page.click("#adSkipUp");
+  await page.click("#adSkipUp");
+  await expect(val).toHaveText("ad 40s");
+
+  await tolFloor(page);
+  await expect(page.locator("#adSkipDown")).toBeDisabled();
+  await expect(page.locator("#adSkipUp")).toBeEnabled();
+
+  for (let i = 0; i < 40; i++) {
+    if (!(await page.locator("#adSkipUp").isEnabled())) break;
+    await page.click("#adSkipUp");
+  }
+  await expect(val).toHaveText("ad 120s");
+  await expect(page.locator("#adSkipUp")).toBeDisabled();
+
+  await page.click("#adSkipDown");
+  await page.reload();
+  await expect(page.locator("#adSkipVal")).toHaveText("ad 115s");
+});
+
+test("a stored tolerance off the scale is brought back onto it", async ({ page }) => {
+  await page.evaluate(() =>
+    localStorage.setItem("mash.prefs.v1", JSON.stringify({ adSkip: 9999 })));
+  await page.reload();
+  await expect(page.locator("#adSkipVal")).toHaveText("ad 120s");
+
+  await page.evaluate(() =>
+    localStorage.setItem("mash.prefs.v1", JSON.stringify({ adSkip: "whenever" })));
+  await page.reload();
+  await expect(page.locator("#adSkipVal")).toHaveText("ad 35s");
+});

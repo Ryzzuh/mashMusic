@@ -261,7 +261,7 @@ test("the pill is highlighted only when a non-default mode is active", async ({ 
    all collapsed", and hard-coding the count meant adding a control silently
    changed what six assertions were checking. The order is pinned by
    "controls collapse into the panel and come back when there is room". */
-const COLLAPSIBLES = ["playlist", "switch", "listmode"];
+const COLLAPSIBLES = ["adskip", "playlist", "switch", "listmode"];
 
 const settle = (page) =>
   page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));

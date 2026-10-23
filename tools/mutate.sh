@@ -808,6 +808,66 @@ mut 'stopping mid-ad leaves the player muted forever' app.js \
   '    if (!state.playing && adTimer) { clearInterval(adTimer); adTimer = 0; }' \
   tests/ads.spec.js 'hands the mute back'
 
+# ------------------------------------------- giving up on a long ad
+#
+# The tolerance is the reader's, so both halves need cover: the stopwatch that
+# decides when an ad has run too long, and the stepper that sets the number.
+
+mut 'an ad runs as long as it likes' app.js \
+  '    if (Date.now() - adSince >= adTol * 1000) adBail();' \
+  '    void adBail;' \
+  tests/ads.spec.js 'costs the track, not the reader'
+
+mut 'the tolerance is ignored and every ad takes the track' app.js \
+  '    if (Date.now() - adSince >= adTol * 1000) adBail();' \
+  '    if (Date.now() - adSince >= 0) adBail();' \
+  tests/ads.spec.js 'inside the tolerance is left to finish'
+
+# The stopwatch has to start once. Restarted on every sample it never reaches
+# the tolerance, which looks exactly like the feature being off.
+mut 'the stopwatch restarts on every sample' app.js \
+  '    if (!adSince) adSince = Date.now();' \
+  '    adSince = Date.now();' \
+  tests/ads.spec.js 'costs the track, not the reader'
+
+# Pressing Next does not decay a track and neither does this: the song was
+# never heard, and marking it played would delete it from the session.
+mut 'the abandoned track is marked played' app.js \
+  '    $("statNote").textContent = `skipped a track \u00b7 ad over ${adTol}s`;
+    next();' \
+  '    played.add(state.current.k);
+    store.write(K_PLAYED, [...played]);
+    next();' \
+  tests/ads.spec.js 'costs the track, not the reader'
+
+mut 'a single playable track is skipped onto itself' app.js \
+  '    if (playable < 2) return;' \
+  '    if (false) return;' \
+  tests/ads.spec.js 'nowhere to go'
+
+mut 'the steps move by one second, not five' app.js \
+  '  if ($("adSkipDown")) $("adSkipDown").addEventListener("click", () => setAdTol(adTol - AD_TOL.step));' \
+  '  if ($("adSkipDown")) $("adSkipDown").addEventListener("click", () => setAdTol(adTol - 1));' \
+  tests/ads.spec.js 'steps by five'
+
+mut 'the scale has no ends' app.js \
+  '    return Math.min(AD_TOL.max, Math.max(AD_TOL.min, n));' \
+  '    return n;' \
+  tests/ads.spec.js 'off the scale is brought back'
+
+mut 'a step at a limit still looks live' app.js \
+  '    if (down) down.disabled = adTol <= AD_TOL.min;
+    if (up) up.disabled = adTol >= AD_TOL.max;' \
+  '    if (down) down.disabled = false;
+    if (up) up.disabled = false;' \
+  tests/ads.spec.js 'steps by five'
+
+mut 'the tolerance is forgotten on reload' app.js \
+  '    prefs.adSkip = adTol;
+    store.write(K_PREF, prefs);' \
+  '    prefs.adSkip = adTol;' \
+  tests/ads.spec.js 'steps by five'
+
 # ------------------------------------------------ the background-playback tip
 
 mut 'the tip is shown at every width, not just on a phone' app.js \
